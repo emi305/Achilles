@@ -9,7 +9,7 @@ const navItems = [
 export function TopNav() {
   return (
     <nav className="border-b border-slate-200 bg-white">
-      <div className="mx-auto flex w-full max-w-4xl items-center gap-6 px-6 py-4">
+      <div className="mx-auto flex w-full max-w-4xl items-center gap-6 px-4 py-4 sm:px-6">
         <span className="text-sm font-semibold text-slate-900">Achilles Insight</span>
         <ul className="flex items-center gap-4 text-sm text-slate-700">
           {navItems.map((item) => (
