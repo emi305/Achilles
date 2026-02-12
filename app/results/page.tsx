@@ -2,85 +2,53 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { clearUploadSession, getUploadSession, type UploadSessionData } from "../lib/session";
+import { clearUploadSession, getUploadSession } from "../lib/session";
+import type { ParsedRow } from "../lib/types";
 
-type ResultsModel = {
-  summary: string;
-  strengths: string[];
-  weaknesses: string[];
-  nextSteps: string[];
-};
-
-function buildMockResults(data: UploadSessionData): ResultsModel {
-  const lowercaseText = data.pastedText?.toLowerCase() ?? "";
-  const lowercaseFileName = data.fileName?.toLowerCase() ?? "";
-
-  if (data.source === "text" && lowercaseText.includes("biology")) {
-    return {
-      summary:
-        "Your pasted notes show stronger performance patterns in biology-related topics with room to tighten mixed-discipline consistency.",
-      strengths: ["Biology recall", "Question pacing", "Pattern recognition"],
-      weaknesses: ["Interdisciplinary integration", "Edge-case reasoning"],
-      nextSteps: [
-        "Review mixed-topic blocks 3x this week.",
-        "Drill missed interdisciplinary questions.",
-        "Retest with timed sets after review.",
-      ],
-    };
-  }
-
-  if (data.source === "file" && lowercaseFileName.includes("diagnostic")) {
-    return {
-      summary:
-        "Your uploaded diagnostic appears baseline-oriented, showing foundational strengths but uneven accuracy in advanced topics.",
-      strengths: ["Core concepts", "Basic interpretation"],
-      weaknesses: ["Advanced reasoning", "Time under pressure"],
-      nextSteps: [
-        "Shift 60% of practice to advanced question sets.",
-        "Use timed 40-question blocks twice weekly.",
-        "Track errors by topic after each block.",
-      ],
-    };
-  }
-
-  const signalLength = data.source === "text" ? (data.pastedText?.trim().length ?? 0) : (data.fileName?.length ?? 0);
-
-  if (signalLength > 120) {
-    return {
-      summary:
-        "The provided input is detailed, suggesting broad topic coverage with a few weaker areas that need focused reinforcement.",
-      strengths: ["Content coverage", "Consistency across core topics"],
-      weaknesses: ["Low-frequency topics", "Second-pass accuracy"],
-      nextSteps: [
-        "Create a short weak-topic checklist before each session.",
-        "Run one targeted review block daily.",
-        "Measure progress with weekly mini-assessments.",
-      ],
-    };
-  }
-
-  return {
-    summary:
-      "The current input is brief, so this mock analysis emphasizes building a stronger baseline before deep optimization.",
-    strengths: ["Study momentum", "Willingness to track performance"],
-    weaknesses: ["Data depth", "Topic-level specificity"],
-    nextSteps: [
-      "Add more detailed subject-by-subject stats.",
-      "Log missed questions by category.",
-      "Re-run analysis after your next full practice session.",
-    ],
-  };
+function formatPercent(value: number) {
+  return `${(value * 100).toFixed(1)}%`;
 }
 
-function SectionCard({ title, items }: { title: string; items: string[] }) {
+function sortWorstToBest(rows: ParsedRow[]) {
+  return [...rows].sort((a, b) => b.roi - a.roi);
+}
+
+function filterByCategory(rows: ParsedRow[], categoryType: ParsedRow["categoryType"]) {
+  return rows.filter((row) => row.categoryType === categoryType);
+}
+
+function RankTable({ title, rows }: { title: string; rows: ParsedRow[] }) {
   return (
     <section className="space-y-3 rounded-lg border border-slate-200 bg-white p-6">
       <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
-      <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">
-        {items.map((item) => (
-          <li key={item}>{item}</li>
-        ))}
-      </ul>
+      {rows.length === 0 ? (
+        <p className="text-sm text-slate-600">No rows available.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-left text-sm">
+            <thead className="text-slate-700">
+              <tr className="border-b border-slate-200">
+                <th className="px-2 py-2">Name</th>
+                <th className="px-2 py-2">Correct/Total</th>
+                <th className="px-2 py-2">Accuracy</th>
+                <th className="px-2 py-2">Weight</th>
+                <th className="px-2 py-2">ROI</th>
+              </tr>
+            </thead>
+            <tbody className="text-slate-800">
+              {rows.map((row) => (
+                <tr className="border-b border-slate-100" key={`${row.categoryType}-${row.name}`}>
+                  <td className="px-2 py-2">{row.name}</td>
+                  <td className="px-2 py-2">{row.correct}/{row.total}</td>
+                  <td className="px-2 py-2">{formatPercent(row.accuracy)}</td>
+                  <td className="px-2 py-2">{formatPercent(row.weight)}</td>
+                  <td className="px-2 py-2">{row.roi.toFixed(4)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </section>
   );
 }
@@ -93,7 +61,7 @@ export default function ResultsPage() {
     return (
       <section className="space-y-4 rounded-lg border border-slate-200 bg-white p-6">
         <h1 className="text-2xl font-semibold tracking-tight">Results</h1>
-        <p className="text-slate-700">No upload data found for this session.</p>
+        <p className="text-slate-700">No parsed CSV found for this session.</p>
         <Link
           href="/upload"
           className="inline-flex items-center rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700"
@@ -104,22 +72,23 @@ export default function ResultsPage() {
     );
   }
 
-  const results = buildMockResults(uploadData);
+  const allRows = sortWorstToBest(uploadData.parsedRows);
+  const competencyRows = sortWorstToBest(filterByCategory(uploadData.parsedRows, "competency_domain"));
+  const clinicalRows = sortWorstToBest(filterByCategory(uploadData.parsedRows, "clinical_presentation"));
+  const disciplineRows = sortWorstToBest(filterByCategory(uploadData.parsedRows, "discipline"));
 
   return (
     <section className="space-y-6">
       <header className="space-y-2">
         <h1 className="text-2xl font-semibold tracking-tight">Results</h1>
+        <p className="text-sm text-slate-600">Rows are ranked worst to best by ROI.</p>
       </header>
 
-      <section className="space-y-3 rounded-lg border border-slate-200 bg-white p-6">
-        <h2 className="text-lg font-semibold text-slate-900">Summary</h2>
-        <p className="text-sm text-slate-700">{results.summary}</p>
-      </section>
-
-      <SectionCard title="Strengths" items={results.strengths} />
-      <SectionCard title="Weaknesses" items={results.weaknesses} />
-      <SectionCard title="Recommended next steps" items={results.nextSteps} />
+      <RankTable title="A) General Combined Rank List" rows={allRows} />
+      <RankTable title="B) Competency Domains Rank List" rows={competencyRows} />
+      <RankTable title="C) Clinical Presentations Rank List" rows={clinicalRows} />
+      <RankTable title="D) Discipline Rank List" rows={disciplineRows} />
+      <RankTable title="Raw Parsed Table (Debug)" rows={uploadData.parsedRows} />
 
       <button
         type="button"

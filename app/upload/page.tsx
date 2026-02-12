@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { parseCsv } from "../lib/parseCsv";
 import { setUploadSession } from "../lib/session";
 
 const ACCEPTED_FILE_TYPES = ".pdf,.png,.jpg,.jpeg";
@@ -9,42 +10,45 @@ const ACCEPTED_FILE_TYPES = ".pdf,.png,.jpg,.jpeg";
 export default function UploadPage() {
   const router = useRouter();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [pastedText, setPastedText] = useState("");
+  const [pastedCsv, setPastedCsv] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
 
   const onAnalyze = () => {
-    const trimmedText = pastedText.trim();
+    const trimmedCsv = pastedCsv.trim();
 
-    if (!selectedFile && !trimmedText) {
-      setErrorMessage("Please upload a file or paste text before analyzing.");
+    if (!selectedFile && !trimmedCsv) {
+      setErrorMessage("Please upload a file or paste CSV before analyzing.");
       return;
     }
 
-    if (selectedFile) {
-      setUploadSession({
-        source: "file",
-        fileName: selectedFile.name,
-        fileType: selectedFile.type,
-        savedAt: new Date().toISOString(),
-      });
-    } else {
-      setUploadSession({
-        source: "text",
-        pastedText: trimmedText,
-        savedAt: new Date().toISOString(),
-      });
+    if (selectedFile && !trimmedCsv) {
+      setErrorMessage("File analysis is not supported yet. Please paste CSV text to analyze.");
+      return;
     }
 
-    setErrorMessage("");
-    router.push("/results");
+    try {
+      const parsedRows = parseCsv(trimmedCsv);
+
+      setUploadSession({
+        pastedCsv: trimmedCsv,
+        parsedRows,
+        savedAt: new Date().toISOString(),
+      });
+
+      setErrorMessage("");
+      router.push("/results");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to parse CSV. Please check the format.";
+      setErrorMessage(message);
+    }
   };
 
   return (
     <section className="space-y-6">
       <div className="space-y-2">
-        <h1 className="text-2xl font-semibold tracking-tight">Upload standardized test input</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Upload standardized test CSV</h1>
         <p className="text-slate-700">
-          Upload a report file or paste your practice stats text to generate insights.
+          Paste CSV in this format: <code>categoryType, name, correct, total</code>.
         </p>
       </div>
 
@@ -63,20 +67,21 @@ export default function UploadPage() {
             }}
             className="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
           />
+          <p className="text-xs text-slate-500">File-only analysis is not supported yet in this MVP.</p>
         </div>
 
         <div className="space-y-2">
-          <label className="block text-sm font-medium text-slate-900" htmlFor="stats-text-input">
-            Or paste text
+          <label className="block text-sm font-medium text-slate-900" htmlFor="stats-csv-input">
+            Or paste CSV text
           </label>
           <textarea
-            id="stats-text-input"
-            rows={8}
-            value={pastedText}
+            id="stats-csv-input"
+            rows={10}
+            value={pastedCsv}
             onChange={(event) => {
-              setPastedText(event.target.value);
+              setPastedCsv(event.target.value);
             }}
-            placeholder="Paste standardized test notes, breakdowns, or score details here..."
+            placeholder="categoryType, name, correct, total&#10;competency_domain, Application of Knowledge for Osteopathic Medical Practice, 42, 60"
             className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400"
           />
         </div>
