@@ -1,10 +1,8 @@
-export type UploadSource = "file" | "text";
+import type { ParsedRow } from "./types";
 
 export type UploadSessionData = {
-  source: UploadSource;
-  fileName?: string;
-  fileType?: string;
-  pastedText?: string;
+  pastedCsv: string;
+  parsedRows: ParsedRow[];
   savedAt: string;
 };
 

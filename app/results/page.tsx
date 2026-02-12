@@ -1,16 +1,33 @@
 "use client";
 
 import Link from "next/link";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { clearUploadSession, getUploadSession } from "../lib/session";
 import type { ParsedRow } from "../lib/types";
+
+type RankingMode = "roi" | "weakness";
 
 function formatPercent(value: number) {
   return `${(value * 100).toFixed(1)}%`;
 }
 
-function sortWorstToBest(rows: ParsedRow[]) {
-  return [...rows].sort((a, b) => b.roi - a.roi);
+function sortRows(rows: ParsedRow[], rankingMode: RankingMode) {
+  return [...rows].sort((a, b) => {
+    if (rankingMode === "roi") {
+      const byRoi = b.roi - a.roi;
+      if (byRoi !== 0) {
+        return byRoi;
+      }
+      return a.name.localeCompare(b.name);
+    }
+
+    const byWeakness = a.accuracy - b.accuracy;
+    if (byWeakness !== 0) {
+      return byWeakness;
+    }
+    return a.name.localeCompare(b.name);
+  });
 }
 
 function filterByCategory(rows: ParsedRow[], categoryType: ParsedRow["categoryType"]) {
@@ -39,7 +56,9 @@ function RankTable({ title, rows }: { title: string; rows: ParsedRow[] }) {
               {rows.map((row) => (
                 <tr className="border-b border-slate-100" key={`${row.categoryType}-${row.name}`}>
                   <td className="px-2 py-2">{row.name}</td>
-                  <td className="px-2 py-2">{row.correct}/{row.total}</td>
+                  <td className="px-2 py-2">
+                    {row.correct}/{row.total}
+                  </td>
                   <td className="px-2 py-2">{formatPercent(row.accuracy)}</td>
                   <td className="px-2 py-2">{formatPercent(row.weight)}</td>
                   <td className="px-2 py-2">{row.roi.toFixed(4)}</td>
@@ -56,8 +75,24 @@ function RankTable({ title, rows }: { title: string; rows: ParsedRow[] }) {
 export default function ResultsPage() {
   const router = useRouter();
   const uploadData = getUploadSession();
+  const [rankingMode, setRankingMode] = useState<RankingMode>("roi");
 
-  if (!uploadData) {
+  const modeLabel = rankingMode === "roi" ? "Ranking mode: ROI impact" : "Ranking mode: Weakness %";
+
+  const rankedRows = useMemo(() => {
+    if (!uploadData) {
+      return null;
+    }
+
+    return {
+      allRows: sortRows(uploadData.parsedRows, rankingMode),
+      competencyRows: sortRows(filterByCategory(uploadData.parsedRows, "competency_domain"), rankingMode),
+      clinicalRows: sortRows(filterByCategory(uploadData.parsedRows, "clinical_presentation"), rankingMode),
+      disciplineRows: sortRows(filterByCategory(uploadData.parsedRows, "discipline"), rankingMode),
+    };
+  }, [uploadData, rankingMode]);
+
+  if (!uploadData || !rankedRows) {
     return (
       <section className="space-y-4 rounded-lg border border-slate-200 bg-white p-6">
         <h1 className="text-2xl font-semibold tracking-tight">Results</h1>
@@ -72,22 +107,61 @@ export default function ResultsPage() {
     );
   }
 
-  const allRows = sortWorstToBest(uploadData.parsedRows);
-  const competencyRows = sortWorstToBest(filterByCategory(uploadData.parsedRows, "competency_domain"));
-  const clinicalRows = sortWorstToBest(filterByCategory(uploadData.parsedRows, "clinical_presentation"));
-  const disciplineRows = sortWorstToBest(filterByCategory(uploadData.parsedRows, "discipline"));
-
   return (
     <section className="space-y-6">
       <header className="space-y-2">
         <h1 className="text-2xl font-semibold tracking-tight">Results</h1>
-        <p className="text-sm text-slate-600">Rows are ranked worst to best by ROI.</p>
+        <p className="text-sm text-slate-600">{modeLabel}</p>
       </header>
 
-      <RankTable title="A) General Combined Rank List" rows={allRows} />
-      <RankTable title="B) Competency Domains Rank List" rows={competencyRows} />
-      <RankTable title="C) Clinical Presentations Rank List" rows={clinicalRows} />
-      <RankTable title="D) Discipline Rank List" rows={disciplineRows} />
+      <section className="space-y-3 rounded-lg border border-slate-200 bg-white p-4">
+        <p className="text-sm font-medium text-slate-900">Sort ranking by</p>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setRankingMode("roi");
+            }}
+            className={`rounded-md px-3 py-2 text-sm ${
+              rankingMode === "roi" ? "bg-slate-900 text-white" : "border border-slate-300 bg-white text-slate-700"
+            }`}
+          >
+            Rank by ROI
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setRankingMode("weakness");
+            }}
+            className={`rounded-md px-3 py-2 text-sm ${
+              rankingMode === "weakness"
+                ? "bg-slate-900 text-white"
+                : "border border-slate-300 bg-white text-slate-700"
+            }`}
+          >
+            Rank by Weakness %
+          </button>
+        </div>
+      </section>
+
+      <section className="space-y-2 rounded-lg border border-slate-200 bg-white p-6">
+        <h2 className="text-lg font-semibold text-slate-900">What is ROI?</h2>
+        <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">
+          <li>"Accuracy" = correct/total for that category.</li>
+          <li>"Weight" = how much that category counts on COMLEX Level 2 (as a %).</li>
+          <li>"ROI = (1 − accuracy) × weight"</li>
+          <li>Higher ROI means: improving this area is more likely to raise your score.</li>
+          <li>
+            Weakness % mode answers: “What am I worst at?” ROI mode answers: “What should I fix first to gain the
+            most points?”
+          </li>
+        </ul>
+      </section>
+
+      <RankTable title="A) General Combined Rank List" rows={rankedRows.allRows} />
+      <RankTable title="B) Competency Domains Rank List" rows={rankedRows.competencyRows} />
+      <RankTable title="C) Clinical Presentations Rank List" rows={rankedRows.clinicalRows} />
+      <RankTable title="D) Discipline Rank List" rows={rankedRows.disciplineRows} />
       <RankTable title="Raw Parsed Table (Debug)" rows={uploadData.parsedRows} />
 
       <button

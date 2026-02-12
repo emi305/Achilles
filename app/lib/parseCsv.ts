@@ -23,7 +23,9 @@ export function parseCsv(csvText: string): ParsedRow[] {
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
 
-  if (lines.length === 0) throw new Error("CSV input is empty.");
+  if (lines.length === 0) {
+    throw new Error("CSV input is empty.");
+  }
 
   const headerParts = lines[0].split(",").map((cell) => cell.trim());
   const isExpectedHeader =
@@ -52,22 +54,39 @@ export function parseCsv(csvText: string): ParsedRow[] {
       );
     }
 
-    if (!nameRaw) throw new Error(`Missing name on line ${lineNumber}.`);
+    if (!nameRaw) {
+      throw new Error(`Missing name on line ${lineNumber}.`);
+    }
 
     const correct = parseInteger(correctRaw, "correct", lineNumber);
     const total = parseInteger(totalRaw, "total", lineNumber);
 
-    if (total === 0) throw new Error(`Invalid total on line ${lineNumber}. Total must be greater than 0.`);
-    if (correct > total) throw new Error(`Invalid row on line ${lineNumber}. Correct cannot be greater than total.`);
+    if (total === 0) {
+      throw new Error(`Invalid total on line ${lineNumber}. Total must be greater than 0.`);
+    }
+
+    if (correct > total) {
+      throw new Error(`Invalid row on line ${lineNumber}. Correct cannot be greater than total.`);
+    }
 
     const accuracy = correct / total;
     const weight = getWeightForCategory(categoryTypeRaw, nameRaw);
     const roi = (1 - accuracy) * weight;
 
-    parsedRows.push({ categoryType: categoryTypeRaw, name: nameRaw, correct, total, accuracy, weight, roi });
+    parsedRows.push({
+      categoryType: categoryTypeRaw,
+      name: nameRaw,
+      correct,
+      total,
+      accuracy,
+      weight,
+      roi,
+    });
   }
 
-  if (parsedRows.length === 0) throw new Error("CSV has no data rows.");
+  if (parsedRows.length === 0) {
+    throw new Error("CSV has no data rows.");
+  }
 
   return parsedRows;
 }
