@@ -17,6 +17,42 @@ function parseInteger(value: string, label: string, lineNumber: number): number 
   return Number(trimmed);
 }
 
+function splitCsvLine(line: string): string[] {
+  const fields: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+
+    if (char === '"') {
+      if (inQuotes) {
+        const nextChar = line[index + 1];
+        if (nextChar === '"') {
+          current += '"';
+          index += 1;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        inQuotes = true;
+      }
+      continue;
+    }
+
+    if (char === "," && !inQuotes) {
+      fields.push(current);
+      current = "";
+      continue;
+    }
+
+    current += char;
+  }
+
+  fields.push(current);
+  return fields;
+}
+
 export function parseCsv(csvText: string): ParsedRow[] {
   const lines = csvText
     .split(/\r?\n/)
@@ -27,7 +63,7 @@ export function parseCsv(csvText: string): ParsedRow[] {
     throw new Error("CSV input is empty.");
   }
 
-  const headerParts = lines[0].split(",").map((cell) => cell.trim());
+  const headerParts = splitCsvLine(lines[0]).map((cell) => cell.trim());
   const isExpectedHeader =
     headerParts.length === EXPECTED_HEADER.length &&
     EXPECTED_HEADER.every((headerCell, index) => headerParts[index] === headerCell);
@@ -40,7 +76,7 @@ export function parseCsv(csvText: string): ParsedRow[] {
 
   for (let index = 1; index < lines.length; index += 1) {
     const lineNumber = index + 1;
-    const parts = lines[index].split(",").map((cell) => cell.trim());
+    const parts = splitCsvLine(lines[index]).map((cell) => cell.trim());
 
     if (parts.length !== 4) {
       throw new Error(`Invalid CSV row on line ${lineNumber}. Expected 4 columns.`);
@@ -90,3 +126,11 @@ export function parseCsv(csvText: string): ParsedRow[] {
 
   return parsedRows;
 }
+
+// Sanity examples:
+// splitCsvLine('competency_domain,"Osteopathic Principles, Practice, and Manipulative Treatment",6,20')
+// => ["competency_domain", "Osteopathic Principles, Practice, and Manipulative Treatment", "6", "20"]
+// splitCsvLine('discipline,"Psychiatry ""consult"" cases",5,10')
+// => ["discipline", "Psychiatry \"consult\" cases", "5", "10"]
+// splitCsvLine('discipline,Internal Medicine,50,80')
+// => ["discipline", "Internal Medicine", "50", "80"]
