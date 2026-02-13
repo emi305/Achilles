@@ -17,7 +17,7 @@ function parseInteger(value: string, label: string, lineNumber: number): number 
   return Number(trimmed);
 }
 
-function splitCsvLine(line: string): string[] {
+export function splitCsvLine(line: string): string[] {
   const fields: string[] = [];
   let current = "";
   let inQuotes = false;
