@@ -5,13 +5,78 @@
 * {
   box-sizing: border-box;
 }
+
 html {
   scrollbar-gutter: stable;
   overflow-x: hidden;
 }
+
 html,
 body {
   margin: 0;
   padding: 0;
   overflow-x: hidden;
+}
+
+body {
+  font-family: var(--font-greek-body), Georgia, serif;
+  background-color: #faf9f6;
+}
+
+.brand-title {
+  font-family: var(--font-greek-title), "Times New Roman", serif;
+}
+
+.greek-theme {
+  position: relative;
+}
+
+.greek-theme::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -20;
+  pointer-events: none;
+  opacity: 0.08;
+  background-image: url("/greek/vase.svg"), url("/greek/grapes.svg"), url("/greek/laurel.svg");
+  background-repeat: repeat;
+  background-size: 160px, 140px, 180px;
+  background-position: 0 0, 80px 120px, 160px 40px;
+}
+
+.greek-column {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  width: 56px;
+  pointer-events: none;
+  z-index: -10;
+  background-repeat: repeat-y;
+  background-size: contain;
+  opacity: 0.85;
+}
+
+.greek-column-left {
+  left: 0;
+  background-image: url("/greek/column-left.svg");
+  background-position: left top;
+}
+
+.greek-column-right {
+  right: 0;
+  background-image: url("/greek/column-right.svg");
+  background-position: right top;
+}
+
+@media (max-width: 1024px) {
+  .greek-column {
+    width: 40px;
+    opacity: 0.7;
+  }
+}
+
+@media (max-width: 768px) {
+  .greek-column {
+    display: none;
+  }
 }

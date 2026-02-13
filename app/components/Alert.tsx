@@ -7,7 +7,7 @@ type AlertProps = {
 
 const alertStyles: Record<NonNullable<AlertProps["variant"]>, string> = {
   error: "border-red-200 bg-red-50 text-red-800",
-  info: "border-slate-200 bg-slate-50 text-slate-700",
+  info: "border-stone-200 bg-stone-50 text-stone-700",
 };
 
 export function Alert({ children, variant = "error" }: AlertProps) {
