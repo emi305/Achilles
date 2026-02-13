@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Alert } from "../components/Alert";
+import { Card } from "../components/Card";
 import { parseAnyCsv } from "../lib/parseAnyCsv";
 import { setUploadSession } from "../lib/session";
 import { TEMPLATE_OPTIONS, type TemplateChoice, type TemplateId } from "../lib/templates";
@@ -9,6 +11,7 @@ import type { CategoryType } from "../lib/types";
 
 const ACCEPTED_FILE_TYPES = ".pdf,.png,.jpg,.jpeg";
 const PROFILE_STORAGE_KEY = "achilles-upload-profiles";
+const ACTIVE_PROFILE_STORAGE_KEY = "achilles-active-profile";
 
 type ProfileSettings = {
   templateChoice: TemplateChoice;
@@ -65,13 +68,26 @@ function loadProfilesFromLocalStorage(): ProfilesMap {
 
   try {
     const parsed = JSON.parse(raw) as ProfilesMap;
-    if (!parsed[DEFAULT_PROFILE_NAME]) {
-      parsed[DEFAULT_PROFILE_NAME] = DEFAULT_SETTINGS;
-    }
-    return parsed;
+    return {
+      [DEFAULT_PROFILE_NAME]: DEFAULT_SETTINGS,
+      ...parsed,
+    };
   } catch {
     return { [DEFAULT_PROFILE_NAME]: DEFAULT_SETTINGS };
   }
+}
+
+function loadActiveProfileFromLocalStorage(profiles: ProfilesMap): string {
+  if (typeof window === "undefined") {
+    return DEFAULT_PROFILE_NAME;
+  }
+
+  const raw = window.localStorage.getItem(ACTIVE_PROFILE_STORAGE_KEY);
+  if (!raw) {
+    return DEFAULT_PROFILE_NAME;
+  }
+
+  return profiles[raw] ? raw : DEFAULT_PROFILE_NAME;
 }
 
 function saveProfilesToLocalStorage(profiles: ProfilesMap) {
@@ -82,52 +98,54 @@ function saveProfilesToLocalStorage(profiles: ProfilesMap) {
   window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profiles));
 }
 
+function saveActiveProfileToLocalStorage(profileName: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(ACTIVE_PROFILE_STORAGE_KEY, profileName);
+}
+
 export default function UploadPage() {
   const router = useRouter();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [pastedCsv, setPastedCsv] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
-  const [templateChoice, setTemplateChoice] = useState<TemplateChoice>("auto");
-  const [defaultCategoryType, setDefaultCategoryType] = useState<CategoryType>("discipline");
-  const [profiles, setProfiles] = useState<ProfilesMap>({ [DEFAULT_PROFILE_NAME]: DEFAULT_SETTINGS });
-  const [activeProfile, setActiveProfile] = useState(DEFAULT_PROFILE_NAME);
+  const [profiles, setProfiles] = useState<ProfilesMap>(() => loadProfilesFromLocalStorage());
+  const [activeProfile, setActiveProfile] = useState(() => {
+    const initialProfiles = loadProfilesFromLocalStorage();
+    return loadActiveProfileFromLocalStorage(initialProfiles);
+  });
   const [newProfileName, setNewProfileName] = useState("");
-  const [isReady, setIsReady] = useState(false);
+  const currentSettings = profiles[activeProfile] ?? DEFAULT_SETTINGS;
+  const templateChoice = currentSettings.templateChoice;
+  const defaultCategoryType = currentSettings.defaultCategoryType;
+  const pastedCsv = currentSettings.pastedCsv;
 
   useEffect(() => {
-    const loadedProfiles = loadProfilesFromLocalStorage();
-    const initialSettings = loadedProfiles[DEFAULT_PROFILE_NAME] ?? DEFAULT_SETTINGS;
-
-    setProfiles(loadedProfiles);
-    setActiveProfile(DEFAULT_PROFILE_NAME);
-    setTemplateChoice(initialSettings.templateChoice);
-    setDefaultCategoryType(initialSettings.defaultCategoryType);
-    setPastedCsv(initialSettings.pastedCsv);
-    setIsReady(true);
-  }, []);
+    saveProfilesToLocalStorage(profiles);
+  }, [profiles]);
 
   useEffect(() => {
-    if (!isReady) {
-      return;
-    }
-
-    const nextProfiles: ProfilesMap = {
-      ...profiles,
-      [activeProfile]: {
-        templateChoice,
-        defaultCategoryType,
-        pastedCsv,
-      },
-    };
-
-    setProfiles(nextProfiles);
-    saveProfilesToLocalStorage(nextProfiles);
-  }, [activeProfile, defaultCategoryType, isReady, pastedCsv, templateChoice]);
+    saveActiveProfileToLocalStorage(activeProfile);
+  }, [activeProfile]);
 
   const isDefaultCategoryVisible = useMemo(
     () => templateChoice === "category_performance" || templateChoice === "percent_correct",
     [templateChoice],
   );
+
+  const updateActiveProfileSettings = (partial: Partial<ProfileSettings>) => {
+    setProfiles((prev) => {
+      const previousSettings = prev[activeProfile] ?? DEFAULT_SETTINGS;
+      return {
+        ...prev,
+        [activeProfile]: {
+          ...previousSettings,
+          ...partial,
+        },
+      };
+    });
+  };
 
   const onAnalyze = () => {
     const trimmedCsv = pastedCsv.trim();
@@ -164,12 +182,7 @@ export default function UploadPage() {
   };
 
   const onSwitchProfile = (profileName: string) => {
-    const settings = profiles[profileName] ?? DEFAULT_SETTINGS;
-
     setActiveProfile(profileName);
-    setTemplateChoice(settings.templateChoice);
-    setDefaultCategoryType(settings.defaultCategoryType);
-    setPastedCsv(settings.pastedCsv);
     setErrorMessage("");
   };
 
@@ -186,29 +199,29 @@ export default function UploadPage() {
       return;
     }
 
-    const nextProfiles: ProfilesMap = {
-      ...profiles,
+    setProfiles((prev) => ({
+      ...prev,
       [trimmedName]: {
         templateChoice,
         defaultCategoryType,
         pastedCsv,
       },
-    };
-
-    setProfiles(nextProfiles);
-    saveProfilesToLocalStorage(nextProfiles);
+    }));
     setNewProfileName("");
-    onSwitchProfile(trimmedName);
+    setActiveProfile(trimmedName);
+    setErrorMessage("");
   };
 
   return (
     <section className="space-y-6">
-      <div className="space-y-2">
+      <header className="space-y-2">
         <h1 className="text-2xl font-semibold tracking-tight">Upload standardized test CSV</h1>
-        <p className="text-slate-700">Paste CSV, choose a template, and generate ranked insights.</p>
-      </div>
+        <p className="text-slate-700">
+          Paste your export from TrueLearn/UWorld/etc. Choose a template if auto-detect fails.
+        </p>
+      </header>
 
-      <div className="space-y-4 rounded-lg border border-slate-200 bg-white p-6">
+      <Card title="Settings">
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
             <label className="block text-sm font-medium text-slate-900" htmlFor="profile-select">
@@ -234,7 +247,7 @@ export default function UploadPage() {
             <label className="block text-sm font-medium text-slate-900" htmlFor="new-profile-name">
               Create new profile
             </label>
-            <div className="flex gap-2">
+            <div className="flex flex-col gap-2 sm:flex-row">
               <input
                 id="new-profile-name"
                 value={newProfileName}
@@ -247,7 +260,7 @@ export default function UploadPage() {
               <button
                 type="button"
                 onClick={onCreateProfile}
-                className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100"
+                className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
               >
                 Save
               </button>
@@ -264,7 +277,9 @@ export default function UploadPage() {
               id="template-choice"
               value={templateChoice}
               onChange={(event) => {
-                setTemplateChoice(event.target.value as TemplateChoice);
+                updateActiveProfileSettings({
+                  templateChoice: event.target.value as TemplateChoice,
+                });
               }}
               className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
             >
@@ -285,7 +300,9 @@ export default function UploadPage() {
                 id="default-category-type"
                 value={defaultCategoryType}
                 onChange={(event) => {
-                  setDefaultCategoryType(event.target.value as CategoryType);
+                  updateActiveProfileSettings({
+                    defaultCategoryType: event.target.value as CategoryType,
+                  });
                 }}
                 className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
               >
@@ -296,9 +313,53 @@ export default function UploadPage() {
             </div>
           ) : null}
         </div>
+      </Card>
 
+      <Card title="Input">
         <div className="space-y-2">
-          <label className="block text-sm font-medium text-slate-900" htmlFor="stats-file-upload">
+          <label className="block text-sm font-medium text-slate-900" htmlFor="stats-csv-input">
+            Paste CSV text
+          </label>
+          <textarea
+            id="stats-csv-input"
+            rows={11}
+            value={pastedCsv}
+            onChange={(event) => {
+              updateActiveProfileSettings({
+                pastedCsv: event.target.value,
+              });
+            }}
+            placeholder="Paste CSV content here"
+            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400"
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              updateActiveProfileSettings({
+                pastedCsv: getTemplateSample(templateChoice),
+              });
+              setErrorMessage("");
+            }}
+            className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+          >
+            Load sample
+          </button>
+          <button
+            type="button"
+            onClick={onAnalyze}
+            className="inline-flex items-center rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700"
+          >
+            Analyze
+          </button>
+        </div>
+
+        {errorMessage ? <Alert variant="error">{errorMessage}</Alert> : null}
+
+        <div className="space-y-2 rounded-md border border-dashed border-slate-300 bg-slate-50 p-3">
+          <label className="block text-sm font-medium text-slate-700" htmlFor="stats-file-upload">
             Upload file (.pdf, .png, .jpg, .jpeg)
           </label>
           <input
@@ -311,45 +372,9 @@ export default function UploadPage() {
             }}
             className="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
           />
-          <p className="text-xs text-slate-500">File-only analysis is not supported yet in this MVP.</p>
+          <p className="text-xs text-slate-500">File parsing coming later.</p>
         </div>
-
-        <div className="space-y-2">
-          <label className="block text-sm font-medium text-slate-900" htmlFor="stats-csv-input">
-            Or paste CSV text
-          </label>
-          <textarea
-            id="stats-csv-input"
-            rows={10}
-            value={pastedCsv}
-            onChange={(event) => {
-              setPastedCsv(event.target.value);
-            }}
-            placeholder="Paste CSV content here"
-            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400"
-          />
-          <button
-            type="button"
-            onClick={() => {
-              setPastedCsv(getTemplateSample(templateChoice));
-              setErrorMessage("");
-            }}
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100"
-          >
-            Load sample
-          </button>
-        </div>
-
-        {errorMessage ? <p className="text-sm text-red-600">{errorMessage}</p> : null}
-
-        <button
-          type="button"
-          onClick={onAnalyze}
-          className="inline-flex items-center rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700"
-        >
-          Analyze
-        </button>
-      </div>
+      </Card>
     </section>
   );
 }

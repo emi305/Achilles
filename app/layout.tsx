@@ -15,9 +15,9 @@ type RootLayoutProps = {
 export default function RootLayout({ children }: RootLayoutProps) {
   return (
     <html lang="en">
-      <body className="min-h-screen bg-slate-50 text-slate-900">
+      <body className="min-h-screen overflow-x-hidden bg-slate-50 text-slate-900">
         <TopNav />
-        <main className="mx-auto w-full max-w-4xl px-4 py-10 sm:px-6">{children}</main>
+        <main className="mx-auto w-full max-w-4xl px-4 py-8 sm:px-6 sm:py-10">{children}</main>
       </body>
     </html>
   );

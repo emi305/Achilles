@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Card } from "../components/Card";
 import { clearUploadSession, getUploadSession } from "../lib/session";
 import type { ParsedRow } from "../lib/types";
 
@@ -34,10 +35,47 @@ function filterByCategory(rows: ParsedRow[], categoryType: ParsedRow["categoryTy
   return rows.filter((row) => row.categoryType === categoryType);
 }
 
+function getPriorityReason(rankingMode: RankingMode) {
+  return rankingMode === "roi"
+    ? "High impact because weight is high and accuracy is low."
+    : "Lowest accuracy area.";
+}
+
+function buildTimeSplit(rows: ParsedRow[], rankingMode: RankingMode): Array<{ name: string; percentage: number }> {
+  const topRows = rows.slice(0, 3);
+  if (topRows.length === 0) {
+    return [];
+  }
+
+  const rawValues = topRows.map((row) => (rankingMode === "roi" ? row.roi : 1 - row.accuracy));
+  const safeValues = rawValues.map((value) => (value > 0 ? value : 0));
+  const total = safeValues.reduce((sum, value) => sum + value, 0);
+
+  if (total <= 0) {
+    const equalSplit = Math.floor(100 / topRows.length);
+    const remainder = 100 - equalSplit * topRows.length;
+    return topRows.map((row, index) => ({
+      name: row.name,
+      percentage: equalSplit + (index < remainder ? 1 : 0),
+    }));
+  }
+
+  const rounded = safeValues.map((value) => Math.round((value / total) * 100));
+  const roundedTotal = rounded.reduce((sum, value) => sum + value, 0);
+  const delta = 100 - roundedTotal;
+  if (delta !== 0) {
+    rounded[0] += delta;
+  }
+
+  return topRows.map((row, index) => ({
+    name: row.name,
+    percentage: rounded[index],
+  }));
+}
+
 function RankTable({ title, rows }: { title: string; rows: ParsedRow[] }) {
   return (
-    <section className="space-y-3 rounded-lg border border-slate-200 bg-white p-6">
-      <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
+    <Card title={title}>
       {rows.length === 0 ? (
         <p className="text-sm text-slate-600">No rows available.</p>
       ) : (
@@ -68,7 +106,7 @@ function RankTable({ title, rows }: { title: string; rows: ParsedRow[] }) {
           </table>
         </div>
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -92,10 +130,12 @@ export default function ResultsPage() {
     };
   }, [uploadData, rankingMode]);
 
+  const topPriorities = rankedRows?.allRows.slice(0, 5) ?? [];
+  const timeSplitRows = rankedRows ? buildTimeSplit(rankedRows.allRows, rankingMode) : [];
+
   if (!uploadData || !rankedRows) {
     return (
-      <section className="space-y-4 rounded-lg border border-slate-200 bg-white p-6">
-        <h1 className="text-2xl font-semibold tracking-tight">Results</h1>
+      <Card title="Results">
         <p className="text-slate-700">No parsed CSV found for this session.</p>
         <Link
           href="/upload"
@@ -103,7 +143,7 @@ export default function ResultsPage() {
         >
           Go to Upload
         </Link>
-      </section>
+      </Card>
     );
   }
 
@@ -114,7 +154,41 @@ export default function ResultsPage() {
         <p className="text-sm text-slate-600">{modeLabel}</p>
       </header>
 
-      <section className="space-y-3 rounded-lg border border-slate-200 bg-white p-4">
+      <Card title="Top priorities">
+        {topPriorities.length === 0 ? (
+          <p className="text-sm text-slate-600">No ranked rows available.</p>
+        ) : (
+          <ul className="space-y-3">
+            {topPriorities.map((row) => (
+              <li key={`priority-${row.categoryType}-${row.name}`} className="rounded-md border border-slate-200 p-3">
+                <p className="text-sm font-semibold text-slate-900">{row.name}</p>
+                <p className="mt-1 text-sm text-slate-700">
+                  Accuracy {formatPercent(row.accuracy)} | Weight {formatPercent(row.weight)}
+                  {rankingMode === "roi" ? ` | ROI ${row.roi.toFixed(4)}` : ""}
+                </p>
+                <p className="mt-1 text-xs text-slate-600">{getPriorityReason(rankingMode)}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+
+      <Card title="Recommended time split">
+        {timeSplitRows.length === 0 ? (
+          <p className="text-sm text-slate-600">No split available.</p>
+        ) : (
+          <div className="space-y-1 text-sm text-slate-800">
+            {timeSplitRows.map((item) => (
+              <p key={`time-split-${item.name}`}>
+                {item.name} - {item.percentage}%
+              </p>
+            ))}
+          </div>
+        )}
+        <p className="text-xs text-slate-600">This is a heuristic; adjust based on your timeline.</p>
+      </Card>
+
+      <Card title="Ranking controls">
         <p className="text-sm font-medium text-slate-900">Sort ranking by</p>
         <div className="flex gap-2">
           <button
@@ -142,21 +216,20 @@ export default function ResultsPage() {
             Rank by Weakness %
           </button>
         </div>
-      </section>
+      </Card>
 
-      <section className="space-y-2 rounded-lg border border-slate-200 bg-white p-6">
-        <h2 className="text-lg font-semibold text-slate-900">What is ROI?</h2>
+      <Card title="What is ROI?">
         <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">
-          <li>"Accuracy" = correct/total for that category.</li>
-          <li>"Weight" = how much that category counts on COMLEX Level 2 (as a %).</li>
-          <li>"ROI = (1 − accuracy) × weight"</li>
+          <li>Accuracy = correct/total for that category.</li>
+          <li>Weight = how much that category counts on COMLEX Level 2 (as a %).</li>
+          <li>ROI = (1 - accuracy) x weight.</li>
           <li>Higher ROI means: improving this area is more likely to raise your score.</li>
           <li>
-            Weakness % mode answers: “What am I worst at?” ROI mode answers: “What should I fix first to gain the
-            most points?”
+            Weakness % mode answers what am I worst at. ROI mode answers what should I fix first to gain the most
+            points.
           </li>
         </ul>
-      </section>
+      </Card>
 
       <RankTable title="A) General Combined Rank List" rows={rankedRows.allRows} />
       <RankTable title="B) Competency Domains Rank List" rows={rankedRows.competencyRows} />
