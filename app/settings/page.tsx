@@ -81,7 +81,7 @@ export default function SettingsPage() {
   };
 
   return (
-    <section className="space-y-8">
+    <section className="space-y-8 pt-6 sm:pt-10">
       <BrandHeader subtitle="Settings are saved locally per profile and used when analyzing your CSV data." />
 
       <Card title="Settings">

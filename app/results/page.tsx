@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { BrandHeader } from "../components/BrandHeader";
 import { Card } from "../components/Card";
 import { clearUploadSession, getUploadSession } from "../lib/session";
 import type { ParsedRow } from "../lib/types";
@@ -77,12 +78,12 @@ function RankTable({ title, rows }: { title: string; rows: ParsedRow[] }) {
   return (
     <Card title={title}>
       {rows.length === 0 ? (
-        <p className="text-sm text-slate-600">No rows available.</p>
+        <p className="text-sm text-stone-600">No rows available.</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-sm">
-            <thead className="text-slate-700">
-              <tr className="border-b border-slate-200">
+            <thead className="text-stone-700">
+              <tr className="border-b border-stone-200">
                 <th className="px-2 py-2">Name</th>
                 <th className="px-2 py-2">Correct/Total</th>
                 <th className="px-2 py-2">Accuracy</th>
@@ -90,9 +91,9 @@ function RankTable({ title, rows }: { title: string; rows: ParsedRow[] }) {
                 <th className="px-2 py-2">ROI</th>
               </tr>
             </thead>
-            <tbody className="text-slate-800">
+            <tbody className="text-stone-800">
               {rows.map((row) => (
-                <tr className="border-b border-slate-100" key={`${row.categoryType}-${row.name}`}>
+                <tr className="border-b border-stone-100" key={`${row.categoryType}-${row.name}`}>
                   <td className="px-2 py-2">{row.name}</td>
                   <td className="px-2 py-2">
                     {row.correct}/{row.total}
@@ -115,8 +116,6 @@ export default function ResultsPage() {
   const uploadData = getUploadSession();
   const [rankingMode, setRankingMode] = useState<RankingMode>("roi");
 
-  const modeLabel = rankingMode === "roi" ? "Ranking mode: ROI impact" : "Ranking mode: Weakness %";
-
   const rankedRows = useMemo(() => {
     if (!uploadData) {
       return null;
@@ -135,38 +134,82 @@ export default function ResultsPage() {
 
   if (!uploadData || !rankedRows) {
     return (
-      <Card title="Results">
-        <p className="text-slate-700">No parsed CSV found for this session.</p>
-        <Link
-          href="/upload"
-          className="inline-flex items-center rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700"
-        >
-          Go to Upload
-        </Link>
-      </Card>
+      <section className="space-y-8 pt-6 sm:pt-10">
+        <BrandHeader subtitle="Find and rank your highest-impact weak points." />
+        <Card title="Results">
+          <p className="text-stone-700">No parsed CSV found for this session.</p>
+          <Link
+            href="/upload"
+            className="inline-flex items-center rounded-md bg-stone-800 px-4 py-2 text-sm font-semibold text-amber-50 transition hover:bg-stone-700"
+          >
+            Go to Upload
+          </Link>
+        </Card>
+      </section>
     );
   }
 
   return (
-    <section className="space-y-6">
-      <header className="space-y-2">
-        <h1 className="text-2xl font-semibold tracking-tight">Results</h1>
-        <p className="text-sm text-slate-600">{modeLabel}</p>
-      </header>
+    <section className="space-y-6 pt-6 sm:pt-10">
+      <BrandHeader subtitle="Find and rank your highest-impact weak points." />
+
+      <section className="grid items-center gap-4 md:grid-cols-[1fr_auto_1fr]">
+        <h2 className="text-2xl font-semibold tracking-tight text-stone-900">Results</h2>
+
+        <div className="justify-self-center">
+          <div className="inline-flex items-center gap-2 rounded-md border border-stone-300 bg-white p-1">
+            <button
+              type="button"
+              onClick={() => {
+                setRankingMode("roi");
+              }}
+              className={`rounded-md px-3 py-2 text-sm ${
+                rankingMode === "roi" ? "bg-stone-800 text-amber-50" : "text-stone-700 hover:bg-stone-100"
+              }`}
+            >
+              Rank by ROI
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setRankingMode("weakness");
+              }}
+              className={`rounded-md px-3 py-2 text-sm ${
+                rankingMode === "weakness" ? "bg-stone-800 text-amber-50" : "text-stone-700 hover:bg-stone-100"
+              }`}
+            >
+              Rank by Weakness %
+            </button>
+          </div>
+        </div>
+
+        <div />
+      </section>
+
+      <Card title="ROI definition">
+        <p className="text-sm text-stone-700">
+          ROI = (1 - accuracy) x weight. Higher ROI means fixing that area is more likely to improve your score.
+        </p>
+      </Card>
+
+      <RankTable title="General combined list" rows={rankedRows.allRows} />
+      <RankTable title="Competency domain rank list" rows={rankedRows.competencyRows} />
+      <RankTable title="Clinical presentation rank list" rows={rankedRows.clinicalRows} />
+      <RankTable title="Discipline rank list" rows={rankedRows.disciplineRows} />
 
       <Card title="Top priorities">
         {topPriorities.length === 0 ? (
-          <p className="text-sm text-slate-600">No ranked rows available.</p>
+          <p className="text-sm text-stone-600">No ranked rows available.</p>
         ) : (
           <ul className="space-y-3">
             {topPriorities.map((row) => (
-              <li key={`priority-${row.categoryType}-${row.name}`} className="rounded-md border border-slate-200 p-3">
-                <p className="text-sm font-semibold text-slate-900">{row.name}</p>
-                <p className="mt-1 text-sm text-slate-700">
+              <li key={`priority-${row.categoryType}-${row.name}`} className="rounded-md border border-stone-200 p-3">
+                <p className="text-sm font-semibold text-stone-900">{row.name}</p>
+                <p className="mt-1 text-sm text-stone-700">
                   Accuracy {formatPercent(row.accuracy)} | Weight {formatPercent(row.weight)}
                   {rankingMode === "roi" ? ` | ROI ${row.roi.toFixed(4)}` : ""}
                 </p>
-                <p className="mt-1 text-xs text-slate-600">{getPriorityReason(rankingMode)}</p>
+                <p className="mt-1 text-xs text-stone-600">{getPriorityReason(rankingMode)}</p>
               </li>
             ))}
           </ul>
@@ -175,9 +218,9 @@ export default function ResultsPage() {
 
       <Card title="Recommended time split">
         {timeSplitRows.length === 0 ? (
-          <p className="text-sm text-slate-600">No split available.</p>
+          <p className="text-sm text-stone-600">No split available.</p>
         ) : (
-          <div className="space-y-1 text-sm text-slate-800">
+          <div className="space-y-1 text-sm text-stone-800">
             {timeSplitRows.map((item) => (
               <p key={`time-split-${item.name}`}>
                 {item.name} - {item.percentage}%
@@ -185,57 +228,8 @@ export default function ResultsPage() {
             ))}
           </div>
         )}
-        <p className="text-xs text-slate-600">This is a heuristic; adjust based on your timeline.</p>
+        <p className="text-xs text-stone-600">This is a heuristic; adjust based on your timeline.</p>
       </Card>
-
-      <Card title="Ranking controls">
-        <p className="text-sm font-medium text-slate-900">Sort ranking by</p>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              setRankingMode("roi");
-            }}
-            className={`rounded-md px-3 py-2 text-sm ${
-              rankingMode === "roi" ? "bg-slate-900 text-white" : "border border-slate-300 bg-white text-slate-700"
-            }`}
-          >
-            Rank by ROI
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setRankingMode("weakness");
-            }}
-            className={`rounded-md px-3 py-2 text-sm ${
-              rankingMode === "weakness"
-                ? "bg-slate-900 text-white"
-                : "border border-slate-300 bg-white text-slate-700"
-            }`}
-          >
-            Rank by Weakness %
-          </button>
-        </div>
-      </Card>
-
-      <Card title="What is ROI?">
-        <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">
-          <li>Accuracy = correct/total for that category.</li>
-          <li>Weight = how much that category counts on COMLEX Level 2 (as a %).</li>
-          <li>ROI = (1 - accuracy) x weight.</li>
-          <li>Higher ROI means: improving this area is more likely to raise your score.</li>
-          <li>
-            Weakness % mode answers what am I worst at. ROI mode answers what should I fix first to gain the most
-            points.
-          </li>
-        </ul>
-      </Card>
-
-      <RankTable title="A) General Combined Rank List" rows={rankedRows.allRows} />
-      <RankTable title="B) Competency Domains Rank List" rows={rankedRows.competencyRows} />
-      <RankTable title="C) Clinical Presentations Rank List" rows={rankedRows.clinicalRows} />
-      <RankTable title="D) Discipline Rank List" rows={rankedRows.disciplineRows} />
-      <RankTable title="Raw Parsed Table (Debug)" rows={uploadData.parsedRows} />
 
       <button
         type="button"
@@ -243,7 +237,7 @@ export default function ResultsPage() {
           clearUploadSession();
           router.push("/upload");
         }}
-        className="inline-flex items-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+        className="inline-flex items-center rounded-md border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition hover:bg-stone-100"
       >
         Start over
       </button>

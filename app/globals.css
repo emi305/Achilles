@@ -29,6 +29,9 @@ body {
 
 .greek-theme {
   position: relative;
+  --column-width: 110px;
+  --column-gap: 20px;
+  --frame-side-space: calc(var(--column-width) + var(--column-gap));
 }
 
 .greek-theme::before {
@@ -37,46 +40,91 @@ body {
   inset: 0;
   z-index: -20;
   pointer-events: none;
-  opacity: 0.08;
-  background-image: url("/greek/vase.svg"), url("/greek/grapes.svg"), url("/greek/laurel.svg");
+  opacity: 0.07;
+  background-image: url("/asclepius.svg");
   background-repeat: repeat;
-  background-size: 160px, 140px, 180px;
-  background-position: 0 0, 80px 120px, 160px 40px;
+  background-size: 185px;
+  background-position: 16px 10px;
+}
+
+.greek-main {
+  min-height: 100vh;
+  width: 100%;
+  padding-top: 3rem;
+  padding-bottom: 3rem;
+  padding-left: var(--frame-side-space);
+  padding-right: var(--frame-side-space);
+}
+
+.settings-link-wrap {
+  position: fixed;
+  top: 1rem;
+  right: max(1rem, calc(var(--frame-side-space) - 0.25rem));
+  z-index: 40;
+}
+
+.settings-link {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 0.375rem;
+  border: 1px solid rgb(214 211 209);
+  background: rgb(255 255 255 / 0.92);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: rgb(87 83 78);
+  text-decoration: none;
+  transition: background-color 0.15s ease;
+}
+
+.settings-link:hover {
+  background: rgb(255 255 255);
 }
 
 .greek-column {
   position: fixed;
   top: 0;
   bottom: 0;
-  width: 56px;
+  width: var(--column-width);
   pointer-events: none;
-  z-index: -10;
+  z-index: -8;
   background-repeat: repeat-y;
-  background-size: contain;
-  opacity: 0.85;
+  background-size: 100% auto;
+  opacity: 0.95;
 }
 
 .greek-column-left {
   left: 0;
-  background-image: url("/greek/column-left.svg");
+  background-image: url("/column-left.svg");
   background-position: left top;
 }
 
 .greek-column-right {
   right: 0;
-  background-image: url("/greek/column-right.svg");
+  background-image: url("/column-right.svg");
   background-position: right top;
 }
 
 @media (max-width: 1024px) {
-  .greek-column {
-    width: 40px;
-    opacity: 0.7;
+  .greek-theme {
+    --column-width: 86px;
+    --column-gap: 12px;
   }
 }
 
 @media (max-width: 768px) {
+  .greek-theme {
+    --column-width: 0px;
+    --column-gap: 0px;
+    --frame-side-space: 1rem;
+  }
+
   .greek-column {
     display: none;
+  }
+
+  .settings-link-wrap {
+    right: 1rem;
+    top: 0.75rem;
   }
 }

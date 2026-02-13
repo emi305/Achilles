@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Alert } from "../components/Alert";
 import { BrandHeader } from "../components/BrandHeader";
@@ -93,18 +92,18 @@ export default function UploadPage() {
   };
 
   return (
-    <section className="space-y-8">
+    <section className="space-y-8 pt-6 sm:pt-10">
       <BrandHeader
-        subtitle="Upload standardized test CSV. Paste your data from TrueLearn/UWorld/etc. Choose a template in Settings if auto-detect fails."
+        subtitle="Upload standardized test CSV."
       />
 
-      <Card title="Input" description={helperDescription}>
-        <div className="flex justify-end">
-          <Link href="/settings" className="text-sm font-medium text-stone-700 underline-offset-2 hover:underline">
-            Open Settings
-          </Link>
-        </div>
+      <p className="mx-auto max-w-2xl text-center text-sm text-stone-700 sm:text-base">
+        Paste your data from TrueLearn/UWorld/etc.
+        <br />
+        Choose a template in Settings if auto-detect fails.
+      </p>
 
+      <Card title="Input" description={helperDescription}>
         <div className="space-y-2">
           <label className="block text-sm font-medium text-stone-900" htmlFor="stats-csv-input">
             Paste CSV data
