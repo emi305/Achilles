@@ -63,6 +63,11 @@ body {
   z-index: 40;
 }
 
+.settings-link-wrap-left {
+  right: auto;
+  left: max(1rem, calc(var(--frame-side-space) - 0.25rem));
+}
+
 .settings-link {
   display: inline-flex;
   align-items: center;
@@ -126,5 +131,9 @@ body {
   .settings-link-wrap {
     right: 1rem;
     top: 0.75rem;
+  }
+
+  .settings-link-wrap-left {
+    left: 1rem;
   }
 }
