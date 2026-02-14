@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Alert } from "../components/Alert";
 import { BrandHeader } from "../components/BrandHeader";
@@ -52,11 +52,6 @@ export default function UploadPage() {
     }));
   };
 
-  const helperDescription = useMemo(() => {
-    const templateLabel = templateChoice === "auto" ? "Auto-detect template" : `Template: ${templateChoice}`;
-    return `${activeProfile} profile | ${templateLabel} | Default category: ${defaultCategoryType}`;
-  }, [activeProfile, defaultCategoryType, templateChoice]);
-
   const onAnalyze = () => {
     const trimmedCsv = pastedCsv.trim();
 
@@ -103,7 +98,7 @@ export default function UploadPage() {
         Choose a template in Settings if auto-detect fails.
       </p>
 
-      <Card title="Input" description={helperDescription}>
+      <Card title="Input">
         <div className="space-y-2">
           <label className="block text-sm font-medium text-stone-900" htmlFor="stats-csv-input">
             Paste CSV data

@@ -34,19 +34,6 @@ body {
   --frame-side-space: calc(var(--column-width) + var(--column-gap));
 }
 
-.greek-theme::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -20;
-  pointer-events: none;
-  opacity: 0.07;
-  background-image: url("/asclepius.svg");
-  background-repeat: repeat;
-  background-size: 185px;
-  background-position: 16px 10px;
-}
-
 .greek-main {
   min-height: 100vh;
   width: 100%;
