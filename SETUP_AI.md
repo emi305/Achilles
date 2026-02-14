@@ -63,3 +63,18 @@ You can also test in browser flow:
 2. Leave `Advanced: Parse as CSV` OFF (AI mode)
 3. Paste sample text and click Analyze
 4. Expected: route to `/results` or `/review` (not config error)
+
+## Phase 3B note (PDF/Image import)
+
+Image OCR in Phase 3B also requires `OPENAI_API_KEY`.
+
+Flow:
+
+1. Upload PDF/PNG/JPG/JPEG on `/upload`
+2. Click Analyze
+3. File text is extracted by `/api/import-file`
+4. App continues through existing AI/CSV parsing pipeline to `/results`
+
+If OCR/file import fails, you should see:
+
+`Couldn’t read this file. Try a clearer image or paste text.`

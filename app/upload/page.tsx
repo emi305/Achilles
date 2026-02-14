@@ -33,6 +33,10 @@ type ExtractApiError = {
   message?: string;
 };
 
+type ImportFileResponse = {
+  text: string;
+};
+
 export default function UploadPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -171,21 +175,48 @@ export default function UploadPage() {
       return;
     }
 
-    if (!trimmedText) {
-      setErrorMessage("PDF/Image import is not available in Phase 3A. Please paste text to analyze.");
-      return;
-    }
-
     setIsAnalyzing(true);
     setErrorMessage("");
     setShowAiSetupChecklist(false);
     console.log("[Analyze] mode=", useAdvancedCsv ? "CSV" : "AI");
 
     try {
+      let inputToAnalyze = trimmedText;
+
+      if (!inputToAnalyze && selectedFile) {
+        const formData = new FormData();
+        formData.set("file", selectedFile);
+
+        const fileResponse = await fetch("/api/import-file", {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!fileResponse.ok) {
+          const errorBody = (await fileResponse.json().catch(() => null)) as ExtractApiError | null;
+          if (errorBody?.error === "EXTRACTION_NOT_CONFIGURED") {
+            setErrorMessage("AI extraction is not configured. Add OPENAI_API_KEY to .env.local and restart npm run dev.");
+            setShowAiSetupChecklist(true);
+            return;
+          }
+          setErrorMessage("Couldn’t read this file. Try a clearer image or paste text.");
+          return;
+        }
+
+        const payload = (await fileResponse.json()) as ImportFileResponse;
+        inputToAnalyze = payload.text.trim();
+        updateActiveProfileText(inputToAnalyze);
+      }
+
+      if (!inputToAnalyze) {
+        setErrorMessage("Couldn’t read this file. Try a clearer image or paste text.");
+        return;
+      }
+
       if (useAdvancedCsv) {
-        await handleAnalyzeCsv(trimmedText);
+        await handleAnalyzeCsv(inputToAnalyze);
       } else {
-        await handleAnalyzeAi(trimmedText);
+        await handleAnalyzeAi(inputToAnalyze);
       }
     } finally {
       setIsAnalyzing(false);
