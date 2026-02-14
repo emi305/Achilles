@@ -2,11 +2,11 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Alert } from "../components/Alert";
 import { BrandHeader } from "../components/BrandHeader";
 import { Card } from "../components/Card";
-import { normalizeExtractRows } from "../lib/normalizeExtract";
+import { normalizeExtractRows, normalizeExtractedRow } from "../lib/normalizeExtract";
 import { parseAnyCsv } from "../lib/parseAnyCsv";
 import { clearReviewSession, setReviewSession } from "../lib/reviewSession";
 import { setUploadSession } from "../lib/session";
@@ -35,6 +35,7 @@ type ExtractApiError = {
 
 export default function UploadPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [showAiSetupChecklist, setShowAiSetupChecklist] = useState(false);
@@ -47,6 +48,7 @@ export default function UploadPage() {
   const templateChoice = currentSettings.templateChoice;
   const defaultCategoryType = currentSettings.defaultCategoryType;
   const rawInput = currentSettings.pastedCsv;
+  const debugReview = searchParams.get("debug") === "1";
 
   useEffect(() => {
     saveProfilesToLocalStorage(profiles);
@@ -113,23 +115,29 @@ export default function UploadPage() {
           setShowAiSetupChecklist(true);
           return;
         }
-        throw new Error(errorBody?.message ?? "Extraction failed. Please try again.");
+        throw new Error(errorBody?.message ?? "Extraction failed.");
       }
 
       const extracted = (await response.json()) as ExtractResponse;
-      const normalized = normalizeExtractRows(extracted.rows);
+      const normalizedExtractedRows = extracted.rows.map((row) => normalizeExtractedRow(row));
+      const normalized = normalizeExtractRows(normalizedExtractedRows);
       const combinedWarnings = [...extracted.warnings, ...normalized.warnings];
-      const shouldReview =
-        extracted.overallConfidence < 0.8 ||
-        combinedWarnings.length > 0 ||
-        normalized.hasMissingRequired ||
-        normalized.parsedRows.length === 0;
 
-      if (shouldReview) {
+      if (normalized.hasMissingRequired || normalized.parsedRows.length === 0) {
+        setErrorMessage("Couldn't read this report. Try again or switch to Advanced CSV.");
+        return;
+      }
+
+      const shouldReviewInDebug =
+        debugReview &&
+        (extracted.overallConfidence < 0.8 || combinedWarnings.length > 0 || normalized.hasMissingRequired);
+
+      if (shouldReviewInDebug) {
         setReviewSession({
           rawText: trimmedText,
           extracted: {
             ...extracted,
+            rows: normalizedExtractedRows,
             warnings: combinedWarnings,
           },
           parsedRows: normalized.parsedRows,
@@ -147,8 +155,10 @@ export default function UploadPage() {
       });
       router.push("/results");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unable to analyze input.";
-      setErrorMessage(message);
+      if (process.env.NODE_ENV === "development") {
+        console.error("[Analyze][AI] extraction error:", error);
+      }
+      setErrorMessage("Couldn't read this report. Try again or switch to Advanced CSV.");
       setShowAiSetupChecklist(false);
     }
   };

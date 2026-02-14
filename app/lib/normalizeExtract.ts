@@ -51,21 +51,93 @@ function toNumberOrUndefined(value: unknown): number | undefined {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;
   }
+
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
   return undefined;
 }
 
-function buildParsedRow(row: ExtractedRow): { parsedRow?: ParsedRow; warning?: string; missingRequired: boolean } {
-  const name = normalizeName(row.categoryType, row.name);
+function clamp01(value: number) {
+  return Math.max(0, Math.min(1, value));
+}
+
+export function normalizePercentCorrect(row: ExtractedRow): number | null {
+  const total = toNumberOrUndefined(row.total);
+  const correct = toNumberOrUndefined(row.correct);
+
+  if (typeof correct === "number" && typeof total === "number" && total > 0) {
+    return clamp01(correct / total);
+  }
+
+  const rawPercent = (row as unknown as { percentCorrect?: unknown }).percentCorrect;
+  if (rawPercent === undefined || rawPercent === null) {
+    return null;
+  }
+
+  let parsedPercent: number | undefined;
+
+  if (typeof rawPercent === "string") {
+    const trimmed = rawPercent.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    if (trimmed.includes("%")) {
+      const parsed = Number.parseFloat(trimmed.replace("%", ""));
+      if (!Number.isFinite(parsed)) {
+        return null;
+      }
+      parsedPercent = parsed / 100;
+    } else {
+      const parsed = Number(trimmed);
+      if (!Number.isFinite(parsed)) {
+        return null;
+      }
+      parsedPercent = parsed;
+    }
+  } else {
+    parsedPercent = toNumberOrUndefined(rawPercent);
+  }
+
+  if (typeof parsedPercent !== "number") {
+    return null;
+  }
+
+  if (parsedPercent > 1) {
+    parsedPercent /= 100;
+  }
+
+  return clamp01(parsedPercent);
+}
+
+export function normalizeExtractedRow(row: ExtractedRow): ExtractedRow {
   const total = toNumberOrUndefined(row.total);
   let correct = toNumberOrUndefined(row.correct);
-  const percentCorrect = toNumberOrUndefined(row.percentCorrect);
+  const normalizedPercent = normalizePercentCorrect(row);
 
-  if (typeof percentCorrect === "number" && (percentCorrect < 0 || percentCorrect > 1)) {
-    return {
-      warning: `${name}: percentCorrect must be between 0 and 1.`,
-      missingRequired: true,
-    };
+  if (typeof correct !== "number" && typeof total === "number" && total > 0 && typeof normalizedPercent === "number") {
+    correct = Math.round(normalizedPercent * total);
   }
+
+  return {
+    ...row,
+    total,
+    correct,
+    percentCorrect: normalizedPercent ?? undefined,
+  };
+}
+
+function buildParsedRow(row: ExtractedRow): { parsedRow?: ParsedRow; warning?: string; missingRequired: boolean } {
+  const normalizedRow = normalizeExtractedRow(row);
+  const name = normalizeName(normalizedRow.categoryType, normalizedRow.name);
+  const total = toNumberOrUndefined(normalizedRow.total);
+  let correct = toNumberOrUndefined(normalizedRow.correct);
+  const percentCorrect = toNumberOrUndefined(normalizedRow.percentCorrect);
 
   if (typeof total === "number" && total <= 0) {
     return {
@@ -98,7 +170,7 @@ function buildParsedRow(row: ExtractedRow): { parsedRow?: ParsedRow; warning?: s
 
   return {
     parsedRow: {
-      categoryType: row.categoryType,
+      categoryType: normalizedRow.categoryType,
       name,
       correct,
       total,
