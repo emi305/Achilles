@@ -8,6 +8,9 @@ export type ParsedRow = {
   accuracy: number;
   weight: number;
   roi: number;
+  originalName?: string;
+  matchScore?: number;
+  unmapped?: boolean;
 };
 
 export type ExtractedRow = {

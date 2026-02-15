@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import pLimit from "p-limit";
 import { extractPdfText } from "../../lib/extractPdfText";
 import { ocrImageText } from "../../lib/ocrImageText";
 
@@ -91,6 +92,7 @@ async function extractTextFromFile(file: File): Promise<ImportFileResult> {
 
 export async function POST(request: Request) {
   try {
+    const startedAt = Date.now();
     const formData = await request.formData();
     const filesRaw = formData.getAll("files");
     const fallbackFile = formData.get("file");
@@ -104,9 +106,16 @@ export async function POST(request: Request) {
       return safeErrorResponse(400, "No file uploaded.");
     }
 
-    const results: ImportFileResult[] = [];
-    for (const file of files) {
-      results.push(await extractTextFromFile(file));
+    const concurrency = Math.max(1, Math.min(5, Number(process.env.IMPORT_FILE_CONCURRENCY ?? 4)));
+    const limit = pLimit(concurrency);
+    const results = await Promise.all(files.map((file) => limit(async () => extractTextFromFile(file))));
+
+    if (process.env.NODE_ENV === "development") {
+      const durationMs = Date.now() - startedAt;
+      const successCount = results.filter((item) => item.ok).length;
+      console.log(
+        `[import-file] completed ${files.length} files in ${durationMs}ms (ok=${successCount}, failed=${files.length - successCount}, concurrency=${concurrency})`,
+      );
     }
 
     return NextResponse.json({ results }, { status: 200 });

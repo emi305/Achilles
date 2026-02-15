@@ -1,51 +1,6 @@
 import { getWeightForCategory } from "./comlexWeights";
-import type { CategoryType, ExtractedRow, NormalizedExtractResult, ParsedRow } from "./types";
-
-const DISCIPLINE_ALIASES: Record<string, string> = {
-  im: "Internal Medicine",
-  "internal med": "Internal Medicine",
-  "internal medicine": "Internal Medicine",
-  fm: "Family Medicine",
-  "family med": "Family Medicine",
-  "family medicine": "Family Medicine",
-  obgyn: "Obstetrics/Gynecology",
-  "ob gyn": "Obstetrics/Gynecology",
-  "ob/gyn": "Obstetrics/Gynecology",
-  obg: "Obstetrics/Gynecology",
-  psych: "Psychiatry",
-  peds: "Pediatrics",
-  ed: "Emergency Medicine",
-  em: "Emergency Medicine",
-  "emergency med": "Emergency Medicine",
-  "osteopathic principles": "Osteopathic Principles and Practice",
-  opp: "Osteopathic Principles and Practice",
-  omm: "Osteopathic Principles and Practice",
-};
-
-const CLINICAL_ALIASES: Record<string, string> = {
-  msk: "Patient Presentations Related to the Musculoskeletal System",
-  musculoskeletal: "Patient Presentations Related to the Musculoskeletal System",
-  neuro: "Patient Presentations Related to the Nervous System and Mental Health",
-  gi: "Patient Presentations Related to the Gastrointestinal System and Nutritional Health",
-  resp: "Patient Presentations Related to the Respiratory System",
-  cards: "Patient Presentations Related to the Circulatory and Hematologic Systems",
-  cardio: "Patient Presentations Related to the Circulatory and Hematologic Systems",
-};
-
-function normalizeName(categoryType: CategoryType, rawName: string): string {
-  const trimmed = rawName.trim();
-  const lowered = trimmed.toLowerCase();
-
-  if (categoryType === "discipline") {
-    return DISCIPLINE_ALIASES[lowered] ?? trimmed;
-  }
-
-  if (categoryType === "clinical_presentation") {
-    return CLINICAL_ALIASES[lowered] ?? trimmed;
-  }
-
-  return trimmed;
-}
+import { canonicalizeCategoryName } from "./nameMatching";
+import type { ExtractedRow, NormalizedExtractResult, ParsedRow } from "./types";
 
 function toNumberOrUndefined(value: unknown): number | undefined {
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -134,7 +89,8 @@ export function normalizeExtractedRow(row: ExtractedRow): ExtractedRow {
 
 function buildParsedRow(row: ExtractedRow): { parsedRow?: ParsedRow; warning?: string; missingRequired: boolean } {
   const normalizedRow = normalizeExtractedRow(row);
-  const name = normalizeName(normalizedRow.categoryType, normalizedRow.name);
+  const matched = canonicalizeCategoryName(normalizedRow.categoryType, normalizedRow.name);
+  const name = matched.canonicalName;
   const total = toNumberOrUndefined(normalizedRow.total);
   let correct = toNumberOrUndefined(normalizedRow.correct);
   const percentCorrect = toNumberOrUndefined(normalizedRow.percentCorrect);
@@ -168,6 +124,12 @@ function buildParsedRow(row: ExtractedRow): { parsedRow?: ParsedRow; warning?: s
   const weight = getWeightForCategory(row.categoryType, name);
   const roi = (1 - accuracy) * weight;
 
+  if (process.env.NODE_ENV === "development") {
+    console.log(
+      `[normalizeExtract] ${normalizedRow.categoryType}: "${normalizedRow.name}" -> "${name}" (score=${matched.score.toFixed(3)}, unmapped=${matched.unmapped})`,
+    );
+  }
+
   return {
     parsedRow: {
       categoryType: normalizedRow.categoryType,
@@ -177,8 +139,12 @@ function buildParsedRow(row: ExtractedRow): { parsedRow?: ParsedRow; warning?: s
       accuracy,
       weight,
       roi,
+      originalName: normalizedRow.name,
+      matchScore: matched.score,
+      unmapped: matched.unmapped,
     },
-    warning: weight === 0 ? `${name}: no known COMLEX weight match; weight set to 0.` : undefined,
+    warning:
+      matched.unmapped || weight === 0 ? `${normalizedRow.name}: not confidently mapped; weight may be 0.` : undefined,
     missingRequired: false,
   };
 }

@@ -94,7 +94,12 @@ function RankTable({ title, rows }: { title: string; rows: ParsedRow[] }) {
             <tbody className="text-stone-800">
               {rows.map((row) => (
                 <tr className="border-b border-stone-100" key={`${row.categoryType}-${row.name}`}>
-                  <td className="px-2 py-2">{row.name}</td>
+                  <td className="px-2 py-2">
+                    <div>
+                      <span>{row.name}</span>
+                      {row.unmapped ? <span className="ml-2 text-xs text-amber-700">(unmapped)</span> : null}
+                    </div>
+                  </td>
                   <td className="px-2 py-2">
                     {row.correct}/{row.total}
                   </td>

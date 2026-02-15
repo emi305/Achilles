@@ -45,6 +45,12 @@ type ImportFileResponse = {
   results: ImportFileResult[];
 };
 
+type FileExtractionStatus = {
+  filename: string;
+  status: "queued" | "extracting" | "done" | "failed";
+  message?: string;
+};
+
 export default function UploadPage() {
   const router = useRouter();
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -53,6 +59,7 @@ export default function UploadPage() {
   const [showAiSetupChecklist, setShowAiSetupChecklist] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [progressLabel, setProgressLabel] = useState("");
+  const [fileStatuses, setFileStatuses] = useState<FileExtractionStatus[]>([]);
   const [profiles, setProfiles] = useState<ProfilesMap>(() => getInitialSettings().profiles);
   const [activeProfile, setActiveProfile] = useState(() => getInitialSettings().activeProfile);
 
@@ -176,13 +183,23 @@ export default function UploadPage() {
 
   const importFilesToText = async (): Promise<string> => {
     if (selectedFiles.length === 0) {
+      setFileStatuses([]);
       return "";
     }
+
+    const initialStatuses = selectedFiles.map((file) => ({
+      filename: file.name,
+      status: "queued" as const,
+    }));
+    setFileStatuses(initialStatuses);
 
     const formData = new FormData();
     for (let index = 0; index < selectedFiles.length; index += 1) {
       const file = selectedFiles[index];
       setProgressLabel(`Extracting ${index + 1}/${selectedFiles.length}: ${file.name}`);
+      setFileStatuses((prev) =>
+        prev.map((item, itemIndex) => (itemIndex === index ? { ...item, status: "extracting" } : item)),
+      );
       formData.append("files", file);
       // Yield to UI so progress text updates while preparing upload.
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -205,6 +222,17 @@ export default function UploadPage() {
     }
 
     const payload = (await response.json()) as ImportFileResponse;
+    const total = payload.results.length;
+    const doneCount = payload.results.filter((item) => item.ok).length;
+    setProgressLabel(`Extracting ${doneCount}/${total} complete`);
+    setFileStatuses(
+      payload.results.map((item) => ({
+        filename: item.filename,
+        status: item.ok ? "done" : "failed",
+        message: item.message,
+      })),
+    );
+
     const warnings = payload.results
       .filter((item) => !item.ok)
       .map((item) => `${item.filename}: ${item.message ?? "Couldn’t read this file."}`);
@@ -254,7 +282,6 @@ export default function UploadPage() {
       }
     } finally {
       setIsAnalyzing(false);
-      setProgressLabel("");
     }
   };
 
@@ -311,6 +338,7 @@ export default function UploadPage() {
                   type="button"
                   onClick={() => {
                     setSelectedFiles([]);
+                    setFileStatuses([]);
                   }}
                   className="text-xs font-medium text-stone-700 underline"
                 >
@@ -354,6 +382,23 @@ export default function UploadPage() {
         </div>
 
         {progressLabel ? <p className="text-sm text-stone-700">{progressLabel}</p> : null}
+
+        {fileStatuses.length > 0 ? (
+          <div className="space-y-1 rounded-md border border-stone-200 bg-stone-50/60 p-3 text-xs text-stone-700">
+            {fileStatuses.map((item) => (
+              <p key={`status-${item.filename}`}>
+                {item.filename}:{" "}
+                {item.status === "extracting"
+                  ? "extracting..."
+                  : item.status === "done"
+                    ? "done"
+                    : item.status === "failed"
+                      ? "failed"
+                      : "queued"}
+              </p>
+            ))}
+          </div>
+        ) : null}
 
         <div className="flex flex-wrap items-center gap-3">
           <button
