@@ -1,6 +1,6 @@
 import type { ParsedRow } from "./types";
 
-export type RankingMode = "roi" | "weakness";
+export type RankingMode = "roi" | "avg";
 
 export function getRoiScore(row: Pick<ParsedRow, "roi">): number {
   return typeof row.roi === "number" && Number.isFinite(row.roi) ? row.roi : 0;
@@ -22,27 +22,24 @@ export function getWeaknessScore(row: Pick<ParsedRow, "accuracy" | "proxyWeaknes
   return 0;
 }
 
-export function sortRowsByMode<T extends Pick<ParsedRow, "roi" | "proi" | "accuracy" | "proxyWeakness" | "name">>(
+export function sortRowsByMode<
+  T extends Pick<ParsedRow, "roi" | "proi" | "accuracy" | "proxyWeakness" | "weight" | "name">,
+>(
   rows: T[],
   mode: RankingMode,
 ): T[] {
   return [...rows].sort((a, b) => {
     const aRoi = getRoiScore(a);
     const bRoi = getRoiScore(b);
-    const aProi = getProiScore(a);
-    const bProi = getProiScore(b);
     const aWeakness = getWeaknessScore(a);
     const bWeakness = getWeaknessScore(b);
 
-    if (mode === "weakness") {
+    if (mode === "avg") {
       if (bWeakness !== aWeakness) {
         return bWeakness - aWeakness;
       }
-      if (bRoi !== aRoi) {
-        return bRoi - aRoi;
-      }
-      if (bProi !== aProi) {
-        return bProi - aProi;
+      if (b.weight !== a.weight) {
+        return b.weight - a.weight;
       }
       return a.name.localeCompare(b.name);
     }
@@ -50,8 +47,8 @@ export function sortRowsByMode<T extends Pick<ParsedRow, "roi" | "proi" | "accur
     if (bRoi !== aRoi) {
       return bRoi - aRoi;
     }
-    if (bProi !== aProi) {
-      return bProi - aProi;
+    if (b.weight !== a.weight) {
+      return b.weight - a.weight;
     }
     return a.name.localeCompare(b.name);
   });

@@ -12,7 +12,7 @@ import {
   subscribeUploadSession,
 } from "../lib/session";
 import type { CategoryType, ParsedRow } from "../lib/types";
-import { getProiScore, getRoiScore, getWeaknessScore, sortRowsByMode, type RankingMode } from "../lib/priority";
+import { getProiScore, getRoiScore, type RankingMode } from "../lib/priority";
 
 type DisplayRow = {
   categoryType: CategoryType;
@@ -20,15 +20,31 @@ type DisplayRow = {
   weight: number;
   roi: number;
   proi: number;
-  weakness: number;
   hasRoi: boolean;
   hasProi: boolean;
+  avgCorrect?: number;
+  weaknessForSort: number;
+  focusScore: number;
 };
 
 type TableSection = {
   key: "general" | CategoryType;
   title: string;
   rows: DisplayRow[];
+};
+
+type AccumulatorRow = {
+  categoryType: CategoryType;
+  name: string;
+  weight: number;
+  roi: number;
+  proi: number;
+  hasRoi: boolean;
+  hasProi: boolean;
+  qbankCorrectSum: number;
+  qbankTotalSum: number;
+  qbankAccuracySum: number;
+  qbankAccuracyCount: number;
 };
 
 const CATEGORY_ORDER: CategoryType[] = ["discipline", "competency_domain", "clinical_presentation"];
@@ -41,126 +57,214 @@ const CATEGORY_LABEL: Record<CategoryType, string> = {
 
 const modeLabels: Record<RankingMode, string> = {
   roi: "Rank by ROI",
-  weakness: "Rank by Weakness %",
+  avg: "Rank by Avg % Correct",
 };
 
 const PROI_PLACEHOLDER = "Not available (upload score report)";
+
+function clamp01(value: number) {
+  return Math.max(0, Math.min(1, value));
+}
 
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
 function formatPercent(value: number) {
-  return `${round2(value * 100).toFixed(2)}%`;
+  return `${round2(value * 100).toFixed(1)}%`;
 }
 
 function formatScore(value: number) {
-  return round2(value).toFixed(3);
+  return value.toFixed(3);
+}
+
+function sortDisplayRows(rows: DisplayRow[], mode: RankingMode): DisplayRow[] {
+  return [...rows].sort((a, b) => {
+    if (mode === "avg") {
+      const aAvg = typeof a.avgCorrect === "number" ? a.avgCorrect : Number.POSITIVE_INFINITY;
+      const bAvg = typeof b.avgCorrect === "number" ? b.avgCorrect : Number.POSITIVE_INFINITY;
+      if (aAvg !== bAvg) {
+        return aAvg - bAvg;
+      }
+      if (b.weight !== a.weight) {
+        return b.weight - a.weight;
+      }
+      return a.name.localeCompare(b.name);
+    }
+
+    if (b.roi !== a.roi) {
+      return b.roi - a.roi;
+    }
+    if (b.weight !== a.weight) {
+      return b.weight - a.weight;
+    }
+    return a.name.localeCompare(b.name);
+  });
+}
+
+function sortByFocusScore(rows: DisplayRow[]): DisplayRow[] {
+  return [...rows].sort((a, b) => {
+    if (b.focusScore !== a.focusScore) {
+      return b.focusScore - a.focusScore;
+    }
+    if (b.proi !== a.proi) {
+      return b.proi - a.proi;
+    }
+    if (b.roi !== a.roi) {
+      return b.roi - a.roi;
+    }
+    if (b.weaknessForSort !== a.weaknessForSort) {
+      return b.weaknessForSort - a.weaknessForSort;
+    }
+    return a.name.localeCompare(b.name);
+  });
+}
+
+function finalizeAccumulator(value: AccumulatorRow): DisplayRow {
+  let avgCorrect: number | undefined;
+
+  if (value.qbankTotalSum > 0) {
+    avgCorrect = clamp01(value.qbankCorrectSum / value.qbankTotalSum);
+  } else if (value.qbankAccuracyCount > 0) {
+    avgCorrect = clamp01(value.qbankAccuracySum / value.qbankAccuracyCount);
+  }
+
+  const weaknessForSort = typeof avgCorrect === "number" ? clamp01(1 - avgCorrect) : 0;
+  const weaknessWeighted = weaknessForSort * value.weight;
+  const focusScore = value.roi + value.proi + weaknessWeighted;
+
+  return {
+    categoryType: value.categoryType,
+    name: value.name,
+    weight: value.weight,
+    roi: value.roi,
+    proi: value.proi,
+    hasRoi: value.hasRoi,
+    hasProi: value.hasProi,
+    avgCorrect,
+    weaknessForSort,
+    focusScore,
+  };
 }
 
 function aggregateRows(rows: ParsedRow[]): DisplayRow[] {
-  const byKey = new Map<string, DisplayRow>();
+  const byKey = new Map<string, AccumulatorRow>();
 
   for (const row of rows) {
     const key = `${row.categoryType}::${row.name}`;
     const roi = getRoiScore(row);
-    const proxyWeakness = typeof row.proxyWeakness === "number" ? row.proxyWeakness : undefined;
-    const hasProi = typeof proxyWeakness === "number";
-    const proi = hasProi ? proxyWeakness * row.weight : getProiScore(row);
-    const weakness = getWeaknessScore(row);
+    const hasProi = typeof row.proxyWeakness === "number" || typeof row.proi === "number";
+    const proi =
+      typeof row.proxyWeakness === "number"
+        ? row.proxyWeakness * row.weight
+        : hasProi
+          ? getProiScore(row)
+          : 0;
+    const hasQbankAccuracy = typeof row.accuracy === "number";
 
-    const current = byKey.get(key);
-    if (!current) {
-      byKey.set(key, {
+    const existing = byKey.get(key);
+    if (!existing) {
+      const created: AccumulatorRow = {
         categoryType: row.categoryType,
         name: row.name,
         weight: row.weight,
         roi,
         proi,
-        weakness,
-        hasRoi: typeof row.accuracy === "number" || roi > 0,
+        hasRoi: hasQbankAccuracy || roi > 0,
         hasProi,
-      });
+        qbankCorrectSum: 0,
+        qbankTotalSum: 0,
+        qbankAccuracySum: 0,
+        qbankAccuracyCount: 0,
+      };
+
+      if (typeof row.correct === "number" && typeof row.total === "number" && row.total > 0) {
+        created.qbankCorrectSum += row.correct;
+        created.qbankTotalSum += row.total;
+      } else if (typeof row.accuracy === "number") {
+        created.qbankAccuracySum += clamp01(row.accuracy);
+        created.qbankAccuracyCount += 1;
+      }
+
+      byKey.set(key, created);
       continue;
     }
 
-    current.weight = Math.max(current.weight, row.weight);
-    current.roi += roi;
-    current.proi += proi;
-    current.weakness = Math.max(current.weakness, weakness);
-    current.hasRoi = current.hasRoi || typeof row.accuracy === "number" || roi > 0;
-    current.hasProi = current.hasProi || hasProi;
+    existing.weight = Math.max(existing.weight, row.weight);
+    existing.roi += roi;
+    existing.proi += proi;
+    existing.hasRoi = existing.hasRoi || hasQbankAccuracy || roi > 0;
+    existing.hasProi = existing.hasProi || hasProi;
+
+    if (typeof row.correct === "number" && typeof row.total === "number" && row.total > 0) {
+      existing.qbankCorrectSum += row.correct;
+      existing.qbankTotalSum += row.total;
+    } else if (typeof row.accuracy === "number") {
+      existing.qbankAccuracySum += clamp01(row.accuracy);
+      existing.qbankAccuracyCount += 1;
+    }
   }
 
-  return Array.from(byKey.values());
-}
-
-function buildTopReason(row: DisplayRow): string {
-  if (row.hasRoi && row.hasProi) {
-    return "Both QBank and score report indicate this as an important weakness.";
-  }
-  if (row.hasRoi) {
-    return "Driven primarily by QBank weakness in a weighted area.";
-  }
-  return "Driven primarily by score-report proxy weakness in a weighted area.";
-}
-
-function buildNarrativeBullets(allRows: DisplayRow[]): string[] {
-  if (allRows.length === 0) {
-    return ["No categories were available for narrative analysis."];
-  }
-
-  const byImpact = [...allRows].sort((a, b) => b.roi + b.proi - (a.roi + a.proi));
-  const byWeight = [...allRows].sort((a, b) => b.weight - a.weight);
-  const overlap = byImpact.filter((row) => row.hasRoi && row.hasProi);
-  const qbankOnly = byImpact.filter((row) => row.hasRoi && !row.hasProi);
-  const scoreOnly = byImpact.filter((row) => row.hasProi && !row.hasRoi);
-
-  const bullets: string[] = [];
-
-  if (overlap.length > 0) {
-    const top = overlap[0];
-    bullets.push(
-      `${top.name} appears in both data sources (ROI ${formatScore(top.roi)}, PROI ${formatScore(top.proi)}), suggesting a persistent weakness in a weighted area (${formatPercent(top.weight)}).`,
-    );
-  }
-
-  if (qbankOnly.length > 0) {
-    const top = qbankOnly[0];
-    bullets.push(
-      `${top.name} is mainly a QBank weakness (${formatPercent(top.weakness)} weakness, ROI ${formatScore(top.roi)}) with meaningful exam weight (${formatPercent(top.weight)}).`,
-    );
-  }
-
-  if (scoreOnly.length > 0) {
-    const top = scoreOnly[0];
-    bullets.push(
-      `${top.name} is primarily score-report driven (PROI ${formatScore(top.proi)}) and should still be addressed even without per-question counts.`,
-    );
-  }
-
-  if (byWeight.length > 0) {
-    const heavy = byWeight[0];
-    bullets.push(
-      `${heavy.name} has one of the highest blueprint weights (${formatPercent(heavy.weight)}), so moderate weakness here can move your overall outcome.`,
-    );
-  }
-
-  const topTwo = byImpact.slice(0, 2);
-  if (topTwo.length === 2) {
-    bullets.push(
-      `Focus first on ${topTwo[0].name} and ${topTwo[1].name}; together they carry the highest combined signal from ROI and PROI.`,
-    );
-  }
-
-  return bullets.slice(0, 6);
+  return Array.from(byKey.values()).map(finalizeAccumulator);
 }
 
 function getSectionRows(rows: DisplayRow[], categoryType: CategoryType) {
   return rows.filter((row) => row.categoryType === categoryType);
 }
 
-function RankTable({ title, rows }: { title: string; rows: DisplayRow[] }) {
+type RankContext = {
+  roiRank: number;
+  proiRank?: number;
+  avgRank?: number;
+};
+
+function buildAchillesInsightBullets(row: DisplayRow, ranks: RankContext): string[] {
+  const topPhrases = ["top priority", "high-importance target", "strong focus area", "key target"];
+  const phrase = topPhrases[(ranks.roiRank + (ranks.avgRank ?? 0)) % topPhrases.length];
+  const bullets = [
+    `This category makes up ${formatPercent(row.weight)} of the test, so it remains a ${phrase}.`,
+    row.hasRoi
+      ? `ROI rank is #${ranks.roiRank} at ${formatScore(row.roi)}, showing strong weighted upside from QBank gains.`
+      : "QBank ROI is limited here, so this recommendation relies more on non-ROI signals.",
+    typeof ranks.avgRank === "number"
+      ? `Avg % Correct rank is #${ranks.avgRank} (lower is worse), currently ${typeof row.avgCorrect === "number" ? formatPercent(row.avgCorrect) : "Not available"}.`
+      : `Avg % Correct is ${typeof row.avgCorrect === "number" ? formatPercent(row.avgCorrect) : "Not available"}.`,
+  ];
+
+  if (row.hasProi && typeof ranks.proiRank === "number") {
+    bullets.push(`Score report also supports this target (PROI rank #${ranks.proiRank}, value ${formatScore(row.proi)}).`);
+  } else {
+    bullets.push("Score report data not uploaded yet, so this recommendation is driven primarily by QBank performance.");
+  }
+
+  return bullets;
+}
+
+function buildWhatToStudyBullets(row: DisplayRow, ranks: RankContext): string[] {
+  const openingOptions = [
+    `This category makes up ${formatPercent(row.weight)} of the test.`,
+    `${formatPercent(row.weight)} of the test sits in this category.`,
+    `This section accounts for ${formatPercent(row.weight)} of the test.`,
+  ];
+  const opening = openingOptions[(ranks.roiRank + (ranks.proiRank ?? 0) + (ranks.avgRank ?? 0)) % openingOptions.length];
+
+  const bullets = [
+    opening,
+    row.hasRoi
+      ? `ROI rank is #${ranks.roiRank} (${formatScore(row.roi)}), so improvements here can translate to strong gains.`
+      : "QBank ROI is limited for this category, so treat this as a secondary QBank target.",
+    typeof ranks.avgRank === "number"
+      ? `Avg % Correct rank is #${ranks.avgRank} at ${typeof row.avgCorrect === "number" ? formatPercent(row.avgCorrect) : "Not available"}, which sets urgency.`
+      : `Avg % Correct is ${typeof row.avgCorrect === "number" ? formatPercent(row.avgCorrect) : "Not available"}.`,
+    row.hasProi
+      ? `Score report agrees (PROI rank #${ranks.proiRank}, value ${formatScore(row.proi)}).`
+      : "Score report data not uploaded yet, so this is based on QBank performance.",
+  ];
+
+  return bullets;
+}
+
+function RankTable({ title, rows, mode }: { title: string; rows: DisplayRow[]; mode: RankingMode }) {
   return (
     <Card title={title}>
       <div className="overflow-x-auto">
@@ -169,8 +273,14 @@ function RankTable({ title, rows }: { title: string; rows: DisplayRow[] }) {
             <tr className="border-b border-stone-200 text-left text-xs uppercase tracking-wide text-stone-600">
               <th className="px-3 py-2">Name</th>
               <th className="px-3 py-2">Weight</th>
-              <th className="px-3 py-2">ROI (QBank)</th>
-              <th className="px-3 py-2">PROI (Score Report)</th>
+              {mode === "roi" ? (
+                <>
+                  <th className="px-3 py-2">ROI (QBank)</th>
+                  <th className="px-3 py-2">PROI (Score Report)</th>
+                </>
+              ) : (
+                <th className="px-3 py-2">Avg % Correct</th>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -178,8 +288,16 @@ function RankTable({ title, rows }: { title: string; rows: DisplayRow[] }) {
               <tr key={`${row.categoryType}-${row.name}`} className="border-b border-stone-100 last:border-0">
                 <td className="px-3 py-2 text-stone-900">{row.name}</td>
                 <td className="px-3 py-2 text-stone-700">{formatPercent(row.weight)}</td>
-                <td className="px-3 py-2 text-stone-700">{row.hasRoi ? formatScore(row.roi) : "—"}</td>
-                <td className="px-3 py-2 text-stone-700">{row.hasProi ? formatScore(row.proi) : PROI_PLACEHOLDER}</td>
+                {mode === "roi" ? (
+                  <>
+                    <td className="px-3 py-2 text-stone-700">{row.hasRoi ? formatScore(row.roi) : "-"}</td>
+                    <td className="px-3 py-2 text-stone-700">{row.hasProi ? formatScore(row.proi) : PROI_PLACEHOLDER}</td>
+                  </>
+                ) : (
+                  <td className="px-3 py-2 text-stone-700">
+                    {typeof row.avgCorrect === "number" ? formatPercent(row.avgCorrect) : "Not available"}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
@@ -196,11 +314,11 @@ export default function ResultsPage() {
   const aggregated = useMemo(() => aggregateRows(parsedRows), [parsedRows]);
 
   const sections = useMemo<TableSection[]>(() => {
-    const generalRows = sortRowsByMode(aggregated, rankingMode);
+    const generalRows = sortDisplayRows(aggregated, rankingMode);
     const categorySections = CATEGORY_ORDER.map((categoryType) => ({
       key: categoryType,
       title: `${CATEGORY_LABEL[categoryType]} Rank List`,
-      rows: sortRowsByMode(getSectionRows(generalRows, categoryType), rankingMode),
+      rows: sortDisplayRows(getSectionRows(generalRows, categoryType), rankingMode),
     }));
 
     return [
@@ -213,11 +331,31 @@ export default function ResultsPage() {
     ];
   }, [aggregated, rankingMode]);
 
-  const topFocusRows = useMemo(
-    () => [...aggregated].sort((a, b) => b.roi + b.proi - (a.roi + a.proi)).slice(0, 5),
-    [aggregated],
-  );
-  const narrativeBullets = useMemo(() => buildNarrativeBullets(aggregated), [aggregated]);
+  const topFive = useMemo(() => sortByFocusScore(aggregated).slice(0, 5), [aggregated]);
+  const roiRankMap = useMemo(() => {
+    const map = new Map<string, number>();
+    sortDisplayRows([...aggregated], "roi").forEach((row, index) => {
+      map.set(`${row.categoryType}::${row.name}`, index + 1);
+    });
+    return map;
+  }, [aggregated]);
+  const avgRankMap = useMemo(() => {
+    const map = new Map<string, number>();
+    sortDisplayRows([...aggregated], "avg").forEach((row, index) => {
+      map.set(`${row.categoryType}::${row.name}`, index + 1);
+    });
+    return map;
+  }, [aggregated]);
+  const proiRankMap = useMemo(() => {
+    const map = new Map<string, number>();
+    [...aggregated]
+      .filter((row) => row.hasProi)
+      .sort((a, b) => b.proi - a.proi)
+      .forEach((row, index) => {
+        map.set(`${row.categoryType}::${row.name}`, index + 1);
+      });
+    return map;
+  }, [aggregated]);
 
   if (parsedRows.length === 0) {
     return (
@@ -251,6 +389,7 @@ export default function ResultsPage() {
                 key={mode}
                 type="button"
                 onClick={() => setRankingMode(mode)}
+                aria-pressed={rankingMode === mode}
                 className={`rounded-md border px-3 py-1.5 text-sm font-medium transition ${
                   rankingMode === mode
                     ? "border-stone-800 bg-stone-800 text-amber-50"
@@ -279,37 +418,56 @@ export default function ResultsPage() {
         </div>
       </Card>
 
-      {sections.map((section) => (
-        <RankTable key={section.key} title={section.title} rows={section.rows} />
-      ))}
-
-      <Card title="Top focus areas">
-        <ul className="space-y-3 text-sm text-stone-800">
-          {topFocusRows.map((row) => (
-            <li
-              key={`top-${row.categoryType}-${row.name}`}
-              className="rounded-md border border-stone-200 bg-stone-50/50 px-3 py-2"
-            >
+      <Card title="Achilles Insight">
+        <ul className="space-y-4 text-sm text-stone-800">
+          {topFive.map((row) => (
+            <li key={`insight-${row.categoryType}-${row.name}`} className="rounded-md border border-stone-200 bg-stone-50/40 p-3">
               <p className="font-semibold text-stone-900">
                 {row.name} ({CATEGORY_LABEL[row.categoryType]})
               </p>
-              <p className="text-stone-700">
-                ROI: {row.hasRoi ? formatScore(row.roi) : "—"} | PROI:{" "}
-                {row.hasProi ? formatScore(row.proi) : PROI_PLACEHOLDER}
+              <p>
+                Weight: {formatPercent(row.weight)} | ROI: {row.hasRoi ? formatScore(row.roi) : "-"} | PROI:{" "}
+                {row.hasProi ? formatScore(row.proi) : PROI_PLACEHOLDER} | Avg % Correct:{" "}
+                {typeof row.avgCorrect === "number" ? formatPercent(row.avgCorrect) : "Not available"}
               </p>
-              <p className="text-stone-600">{buildTopReason(row)}</p>
+              <ul className="list-disc pl-5">
+                {buildAchillesInsightBullets(row, {
+                  roiRank: roiRankMap.get(`${row.categoryType}::${row.name}`) ?? 0,
+                  proiRank: proiRankMap.get(`${row.categoryType}::${row.name}`),
+                  avgRank: avgRankMap.get(`${row.categoryType}::${row.name}`),
+                }).map((bullet) => (
+                  <li key={`${row.name}-${bullet}`}>{bullet}</li>
+                ))}
+              </ul>
             </li>
           ))}
         </ul>
       </Card>
 
-      <Card title="Achilles Insight">
-        <ul className="list-disc space-y-2 pl-5 text-sm text-stone-800">
-          {narrativeBullets.map((bullet) => (
-            <li key={bullet}>{bullet}</li>
+      <Card title="What to study?">
+        <ul className="space-y-4 text-sm text-stone-800">
+          {topFive.map((row) => (
+            <li key={`study-${row.categoryType}-${row.name}`} className="rounded-md border border-stone-200 bg-stone-50/40 p-3">
+              <p className="font-semibold text-stone-900">
+                {row.name} ({CATEGORY_LABEL[row.categoryType]})
+              </p>
+              <ul className="list-disc pl-5">
+                {buildWhatToStudyBullets(row, {
+                  roiRank: roiRankMap.get(`${row.categoryType}::${row.name}`) ?? 0,
+                  proiRank: proiRankMap.get(`${row.categoryType}::${row.name}`),
+                  avgRank: avgRankMap.get(`${row.categoryType}::${row.name}`),
+                }).map((bullet) => (
+                  <li key={`${row.name}-study-${bullet}`}>{bullet}</li>
+                ))}
+              </ul>
+            </li>
           ))}
         </ul>
       </Card>
+
+      {sections.map((section) => (
+        <RankTable key={section.key} title={section.title} rows={section.rows} mode={rankingMode} />
+      ))}
 
       <div className="pt-2">
         <button
