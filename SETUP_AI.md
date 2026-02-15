@@ -78,3 +78,16 @@ Flow:
 If OCR/file import fails, you should see:
 
 `Couldn’t read this file. Try a clearer image or paste text.`
+
+## Multi-file import endpoint (Phase 3B)
+
+`POST /api/import-file` accepts multipart form data with `files` (multiple) and returns:
+
+```json
+{
+  "results": [
+    { "filename": "a.pdf", "ok": true, "text": "..." },
+    { "filename": "b.jpg", "ok": false, "error": "OCR_EMPTY", "message": "..." }
+  ]
+}
+```

@@ -4,8 +4,10 @@ import type { CategoryType } from "./types";
 export const PROFILE_STORAGE_KEY = "achilles-upload-profiles";
 export const ACTIVE_PROFILE_STORAGE_KEY = "achilles-active-profile";
 export const DEFAULT_PROFILE_NAME = "Default";
+export type ParsingMode = "ai" | "csv";
 
 export type ProfileSettings = {
+  parsingMode: ParsingMode;
   templateChoice: TemplateChoice;
   defaultCategoryType: CategoryType;
   pastedCsv: string;
@@ -14,6 +16,7 @@ export type ProfileSettings = {
 export type ProfilesMap = Record<string, ProfileSettings>;
 
 export const DEFAULT_SETTINGS: ProfileSettings = {
+  parsingMode: "ai",
   templateChoice: "auto",
   defaultCategoryType: "discipline",
   pastedCsv: "",
@@ -57,10 +60,19 @@ export function loadProfilesFromLocalStorage(): ProfilesMap {
   }
 
   try {
-    const parsed = JSON.parse(raw) as ProfilesMap;
+    const parsed = JSON.parse(raw) as Record<string, Partial<ProfileSettings>>;
+    const normalized: ProfilesMap = {};
+
+    for (const [profileName, profileSettings] of Object.entries(parsed)) {
+      normalized[profileName] = {
+        ...DEFAULT_SETTINGS,
+        ...profileSettings,
+      };
+    }
+
     return {
       [DEFAULT_PROFILE_NAME]: DEFAULT_SETTINGS,
-      ...parsed,
+      ...normalized,
     };
   } catch {
     return { [DEFAULT_PROFILE_NAME]: DEFAULT_SETTINGS };

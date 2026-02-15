@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { Alert } from "../components/Alert";
 import { BrandHeader } from "../components/BrandHeader";
 import { Card } from "../components/Card";
@@ -33,26 +33,34 @@ type ExtractApiError = {
   message?: string;
 };
 
+type ImportFileResult = {
+  filename: string;
+  ok: boolean;
+  text?: string;
+  error?: string;
+  message?: string;
+};
+
 type ImportFileResponse = {
-  text: string;
+  results: ImportFileResult[];
 };
 
 export default function UploadPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [errorMessage, setErrorMessage] = useState("");
+  const [fileWarnings, setFileWarnings] = useState<string[]>([]);
   const [showAiSetupChecklist, setShowAiSetupChecklist] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [useAdvancedCsv, setUseAdvancedCsv] = useState(false);
+  const [progressLabel, setProgressLabel] = useState("");
   const [profiles, setProfiles] = useState<ProfilesMap>(() => getInitialSettings().profiles);
   const [activeProfile, setActiveProfile] = useState(() => getInitialSettings().activeProfile);
 
   const currentSettings = profiles[activeProfile] ?? DEFAULT_SETTINGS;
   const templateChoice = currentSettings.templateChoice;
   const defaultCategoryType = currentSettings.defaultCategoryType;
+  const parsingMode = currentSettings.parsingMode;
   const rawInput = currentSettings.pastedCsv;
-  const debugReview = searchParams.get("debug") === "1";
 
   useEffect(() => {
     saveProfilesToLocalStorage(profiles);
@@ -68,38 +76,35 @@ export default function UploadPage() {
     }));
   };
 
-  const handleAnalyzeCsv = async (trimmedText: string) => {
+  const handleAnalyzeCsv = async (inputText: string) => {
     try {
       const selectedTemplate: TemplateId | undefined = templateChoice === "auto" ? undefined : templateChoice;
-      const parsedRows = parseAnyCsv(trimmedText, {
+      const parsedRows = parseAnyCsv(inputText, {
         template: selectedTemplate,
         defaultCategoryType,
       });
 
       if (parsedRows.length === 0) {
-        setErrorMessage(
-          "Could not parse as CSV. Either disable Advanced Parse as CSV (to use AI), or paste CSV that matches expected templates.",
-        );
+        setErrorMessage("Couldn’t read this report. Try again or switch to Advanced CSV.");
         return;
       }
 
       clearReviewSession();
       setUploadSession({
-        pastedCsv: trimmedText,
+        pastedCsv: inputText,
         parsedRows,
         savedAt: new Date().toISOString(),
       });
       router.push("/results");
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? `CSV parse failed: ${error.message}`
-          : "Could not parse as CSV. Either disable Advanced Parse as CSV (to use AI), or paste valid CSV.";
-      setErrorMessage(message);
+      if (process.env.NODE_ENV === "development") {
+        console.error("[Analyze][CSV] parse error:", error);
+      }
+      setErrorMessage("Couldn’t read this report. Try again or switch to Advanced CSV.");
     }
   };
 
-  const handleAnalyzeAi = async (trimmedText: string) => {
+  const handleAnalyzeAi = async (inputText: string) => {
     try {
       const response = await fetch("/api/extract", {
         method: "POST",
@@ -108,7 +113,7 @@ export default function UploadPage() {
         },
         body: JSON.stringify({
           exam: "comlex2",
-          rawText: trimmedText,
+          rawText: inputText,
         }),
       });
 
@@ -126,9 +131,11 @@ export default function UploadPage() {
       const normalizedExtractedRows = extracted.rows.map((row) => normalizeExtractedRow(row));
       const normalized = normalizeExtractRows(normalizedExtractedRows);
       const combinedWarnings = [...extracted.warnings, ...normalized.warnings];
+      const debugReview =
+        typeof window !== "undefined" && new URLSearchParams(window.location.search).get("debug") === "1";
 
       if (normalized.hasMissingRequired || normalized.parsedRows.length === 0) {
-        setErrorMessage("Couldn't read this report. Try again or switch to Advanced CSV.");
+        setErrorMessage("Couldn’t read this report. Try again or switch to Advanced CSV.");
         return;
       }
 
@@ -138,7 +145,7 @@ export default function UploadPage() {
 
       if (shouldReviewInDebug) {
         setReviewSession({
-          rawText: trimmedText,
+          rawText: inputText,
           extracted: {
             ...extracted,
             rows: normalizedExtractedRows,
@@ -153,7 +160,7 @@ export default function UploadPage() {
 
       clearReviewSession();
       setUploadSession({
-        pastedCsv: trimmedText,
+        pastedCsv: inputText,
         parsedRows: normalized.parsedRows,
         savedAt: new Date().toISOString(),
       });
@@ -162,64 +169,92 @@ export default function UploadPage() {
       if (process.env.NODE_ENV === "development") {
         console.error("[Analyze][AI] extraction error:", error);
       }
-      setErrorMessage("Couldn't read this report. Try again or switch to Advanced CSV.");
+      setErrorMessage("Couldn’t read this report. Try again or switch to Advanced CSV.");
       setShowAiSetupChecklist(false);
     }
+  };
+
+  const importFilesToText = async (): Promise<string> => {
+    if (selectedFiles.length === 0) {
+      return "";
+    }
+
+    const formData = new FormData();
+    for (let index = 0; index < selectedFiles.length; index += 1) {
+      const file = selectedFiles[index];
+      setProgressLabel(`Extracting ${index + 1}/${selectedFiles.length}: ${file.name}`);
+      formData.append("files", file);
+      // Yield to UI so progress text updates while preparing upload.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    const response = await fetch("/api/import-file", {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorBody = (await response.json().catch(() => null)) as ExtractApiError | null;
+      if (errorBody?.error === "EXTRACTION_NOT_CONFIGURED") {
+        setErrorMessage("AI extraction is not configured. Add OPENAI_API_KEY to .env.local and restart npm run dev.");
+        setShowAiSetupChecklist(true);
+        return "";
+      }
+      setErrorMessage("Couldn’t read this file. Try a clearer image or paste text.");
+      return "";
+    }
+
+    const payload = (await response.json()) as ImportFileResponse;
+    const warnings = payload.results
+      .filter((item) => !item.ok)
+      .map((item) => `${item.filename}: ${item.message ?? "Couldn’t read this file."}`);
+    setFileWarnings(warnings);
+
+    const successfulTexts = payload.results
+      .filter((item) => item.ok && typeof item.text === "string" && item.text.trim().length > 0)
+      .map((item) => `--- FILE: ${item.filename} ---\n${item.text?.trim() ?? ""}`);
+
+    return successfulTexts.join("\n\n").trim();
   };
 
   const onAnalyze = async () => {
     const trimmedText = rawInput.trim();
 
-    if (!selectedFile && !trimmedText) {
-      setErrorMessage("Please paste text or CSV before analyzing.");
+    if (selectedFiles.length === 0 && !trimmedText) {
+      setErrorMessage("Upload files or paste text before analyzing.");
       return;
     }
 
     setIsAnalyzing(true);
+    setProgressLabel("");
     setErrorMessage("");
     setShowAiSetupChecklist(false);
-    console.log("[Analyze] mode=", useAdvancedCsv ? "CSV" : "AI");
+    setFileWarnings([]);
 
     try {
-      let inputToAnalyze = trimmedText;
-
-      if (!inputToAnalyze && selectedFile) {
-        const formData = new FormData();
-        formData.set("file", selectedFile);
-
-        const fileResponse = await fetch("/api/import-file", {
-          method: "POST",
-          body: formData,
-        });
-
-        if (!fileResponse.ok) {
-          const errorBody = (await fileResponse.json().catch(() => null)) as ExtractApiError | null;
-          if (errorBody?.error === "EXTRACTION_NOT_CONFIGURED") {
-            setErrorMessage("AI extraction is not configured. Add OPENAI_API_KEY to .env.local and restart npm run dev.");
-            setShowAiSetupChecklist(true);
-            return;
-          }
-          setErrorMessage("Couldn’t read this file. Try a clearer image or paste text.");
-          return;
-        }
-
-        const payload = (await fileResponse.json()) as ImportFileResponse;
-        inputToAnalyze = payload.text.trim();
-        updateActiveProfileText(inputToAnalyze);
+      const importedText = await importFilesToText();
+      const sections: string[] = [];
+      if (importedText) {
+        sections.push(importedText);
+      }
+      if (trimmedText) {
+        sections.push(`--- PASTED TEXT ---\n${trimmedText}`);
       }
 
-      if (!inputToAnalyze) {
+      const combinedText = sections.join("\n\n").trim();
+      if (!combinedText) {
         setErrorMessage("Couldn’t read this file. Try a clearer image or paste text.");
         return;
       }
 
-      if (useAdvancedCsv) {
-        await handleAnalyzeCsv(inputToAnalyze);
+      if (parsingMode === "csv") {
+        await handleAnalyzeCsv(combinedText);
       } else {
-        await handleAnalyzeAi(inputToAnalyze);
+        await handleAnalyzeAi(combinedText);
       }
     } finally {
       setIsAnalyzing(false);
+      setProgressLabel("");
     }
   };
 
@@ -228,7 +263,7 @@ export default function UploadPage() {
       <BrandHeader subtitle="Upload standardized test data." />
 
       <p className="mx-auto max-w-2xl text-center text-sm text-stone-700 sm:text-base">
-        Paste your score report text (anything), including messy copy/paste tables or CSV snippets.
+        Upload screenshots or PDFs first, then optionally add pasted text.
       </p>
 
       <Card title="Input">
@@ -253,13 +288,62 @@ export default function UploadPage() {
           </select>
         </div>
 
+        <div className="space-y-3 rounded-md border border-stone-300 bg-stone-50/50 p-4">
+          <h3 className="text-base font-semibold text-stone-900">Upload Test Data</h3>
+          <input
+            id="stats-file-upload"
+            type="file"
+            multiple
+            accept={ACCEPTED_FILE_TYPES}
+            onChange={(event) => {
+              const files = Array.from(event.target.files ?? []);
+              setSelectedFiles(files);
+            }}
+            className="block w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900"
+          />
+          <p className="text-xs text-stone-600">Upload screenshots or PDFs (you can select multiple).</p>
+
+          {selectedFiles.length > 0 ? (
+            <div className="space-y-2 rounded-md border border-stone-200 bg-white p-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-stone-800">Selected files ({selectedFiles.length})</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedFiles([]);
+                  }}
+                  className="text-xs font-medium text-stone-700 underline"
+                >
+                  Clear all
+                </button>
+              </div>
+              <ul className="space-y-1 text-sm text-stone-700">
+                {selectedFiles.map((file, index) => (
+                  <li key={`${file.name}-${index}`} className="flex items-center justify-between gap-3">
+                    <span className="truncate">{file.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedFiles((prev) => prev.filter((_, fileIndex) => fileIndex !== index));
+                      }}
+                      className="rounded-md border border-stone-300 px-2 py-1 text-xs text-stone-700 hover:bg-stone-100"
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+
         <div className="space-y-2">
           <label className="block text-sm font-medium text-stone-900" htmlFor="stats-input">
-            Paste your score report text (anything)
+            Or paste text (optional)
           </label>
           <textarea
             id="stats-input"
-            rows={12}
+            rows={10}
             value={rawInput}
             onChange={(event) => {
               updateActiveProfileText(event.target.value);
@@ -269,28 +353,9 @@ export default function UploadPage() {
           />
         </div>
 
-        <div className="flex items-start gap-2 rounded-md border border-stone-200 bg-stone-50/60 px-3 py-2">
-          <input
-            id="advanced-csv-toggle"
-            type="checkbox"
-            checked={useAdvancedCsv}
-            onChange={(event) => {
-              setUseAdvancedCsv(event.target.checked);
-            }}
-            className="mt-0.5"
-          />
-          <div className="space-y-1">
-            <label htmlFor="advanced-csv-toggle" className="text-sm font-medium text-stone-800">
-              Advanced: Parse as CSV
-            </label>
-            <p className="text-xs text-stone-600">Uses deterministic CSV parsing and template detection.</p>
-          </div>
-        </div>
+        {progressLabel ? <p className="text-sm text-stone-700">{progressLabel}</p> : null}
 
         <div className="flex flex-wrap items-center gap-3">
-          <span className="text-xs font-medium uppercase tracking-wide text-stone-600">
-            Mode: {useAdvancedCsv ? "CSV" : "AI"}
-          </span>
           <button
             type="button"
             onClick={onAnalyze}
@@ -300,6 +365,19 @@ export default function UploadPage() {
             {isAnalyzing ? "Analyzing..." : "Analyze"}
           </button>
         </div>
+
+        {fileWarnings.length > 0 ? (
+          <Alert variant="info">
+            <div className="space-y-1">
+              <p>Some files could not be read, but analysis continued:</p>
+              <ul className="list-disc pl-5">
+                {fileWarnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
+            </div>
+          </Alert>
+        ) : null}
 
         {errorMessage ? (
           <Alert variant="error">
@@ -322,23 +400,6 @@ export default function UploadPage() {
             </div>
           </Alert>
         ) : null}
-
-        <div className="space-y-2 rounded-md border border-dashed border-stone-300 bg-stone-50/40 p-3">
-          <label className="block text-sm font-medium text-stone-700" htmlFor="stats-file-upload">
-            Upload file (.pdf, .png, .jpg, .jpeg)
-          </label>
-          <input
-            id="stats-file-upload"
-            type="file"
-            accept={ACCEPTED_FILE_TYPES}
-            onChange={(event) => {
-              const nextFile = event.target.files?.[0] ?? null;
-              setSelectedFile(nextFile);
-            }}
-            className="block w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900"
-          />
-          <p className="text-xs text-stone-500">PDF/Image import coming next (Phase 3B/C).</p>
-        </div>
       </Card>
     </section>
   );

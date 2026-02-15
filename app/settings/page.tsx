@@ -14,6 +14,7 @@ import {
   loadProfilesFromLocalStorage,
   saveActiveProfileToLocalStorage,
   saveProfilesToLocalStorage,
+  type ParsingMode,
   type ProfileSettings,
   type ProfilesMap,
 } from "../lib/uploadSettings";
@@ -33,6 +34,7 @@ export default function SettingsPage() {
   const currentSettings = profiles[activeProfile] ?? DEFAULT_SETTINGS;
   const templateChoice = currentSettings.templateChoice;
   const defaultCategoryType = currentSettings.defaultCategoryType;
+  const parsingMode = currentSettings.parsingMode;
 
   useEffect(() => {
     saveProfilesToLocalStorage(profiles);
@@ -130,6 +132,32 @@ export default function SettingsPage() {
               </button>
             </div>
           </div>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-stone-900" htmlFor="parsing-mode">
+              Parsing mode
+            </label>
+            <select
+              id="parsing-mode"
+              value={parsingMode}
+              onChange={(event) => {
+                updateActiveProfileSettings({
+                  parsingMode: event.target.value as ParsingMode,
+                });
+              }}
+              className="w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900"
+            >
+              <option value="ai">AI (default)</option>
+              <option value="csv">Deterministic CSV</option>
+            </select>
+            <p className="text-xs text-stone-600">
+              AI mode is recommended for pasted reports and uploaded files. CSV mode is for strict CSV inputs.
+            </p>
+          </div>
+
+          <div />
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">

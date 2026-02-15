@@ -12,56 +12,107 @@ function isSupportedImageType(mimeType: string) {
   return mimeType === "image/png" || mimeType === "image/jpeg" || mimeType === "image/jpg";
 }
 
+type ImportFileResult = {
+  filename: string;
+  ok: boolean;
+  text?: string;
+  error?: string;
+  message?: string;
+};
+
+async function extractTextFromFile(file: File): Promise<ImportFileResult> {
+  const mimeType = file.type.toLowerCase();
+  const filename = file.name;
+  const fileNameLowered = file.name.toLowerCase();
+
+  if (process.env.NODE_ENV === "development") {
+    console.log("[import-file] file:", filename, "type:", mimeType || "unknown");
+  }
+
+  try {
+    if (mimeType === "application/pdf" || fileNameLowered.endsWith(".pdf")) {
+      const buffer = Buffer.from(await file.arrayBuffer());
+      const text = await extractPdfText(buffer);
+
+      if (text.length < 20) {
+        return {
+          filename,
+          ok: false,
+          error: "PDF_TEXT_TOO_SHORT",
+          message: "Couldn’t read this file. Try a clearer image or paste text.",
+        };
+      }
+
+      return { filename, ok: true, text };
+    }
+
+    if (isSupportedImageType(mimeType) || /\.(png|jpg|jpeg)$/.test(fileNameLowered)) {
+      const text = await ocrImageText(file);
+      if (!text) {
+        return {
+          filename,
+          ok: false,
+          error: "OCR_EMPTY",
+          message: "Couldn’t read this file. Try a clearer image or paste text.",
+        };
+      }
+
+      return { filename, ok: true, text };
+    }
+
+    return {
+      filename,
+      ok: false,
+      error: "UNSUPPORTED_FILE_TYPE",
+      message: "Unsupported file type. Upload PDF, PNG, JPG, or JPEG.",
+    };
+  } catch (error) {
+    if (error instanceof Error && error.name === "EXTRACTION_NOT_CONFIGURED") {
+      return {
+        filename,
+        ok: false,
+        error: "EXTRACTION_NOT_CONFIGURED",
+        message: "AI extraction is not configured. Add OPENAI_API_KEY to .env.local and restart npm run dev.",
+      };
+    }
+
+    if (process.env.NODE_ENV === "development") {
+      console.error("[import-file] per-file extraction failed:", filename, error);
+    }
+
+    return {
+      filename,
+      ok: false,
+      error: "IMPORT_FAILED",
+      message: "Couldn’t read this file. Try a clearer image or paste text.",
+    };
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();
-    const fileCandidate = formData.get("file");
+    const filesRaw = formData.getAll("files");
+    const fallbackFile = formData.get("file");
+    const files = filesRaw.filter((value): value is File => value instanceof File);
 
-    if (!(fileCandidate instanceof File)) {
+    if (files.length === 0 && fallbackFile instanceof File) {
+      files.push(fallbackFile);
+    }
+
+    if (files.length === 0) {
       return safeErrorResponse(400, "No file uploaded.");
     }
 
-    const file = fileCandidate;
-    const mimeType = file.type.toLowerCase();
-    const fileName = file.name.toLowerCase();
-
-    if (process.env.NODE_ENV === "development") {
-      console.log("[import-file] type=", mimeType || "unknown", "name=", fileName);
+    const results: ImportFileResult[] = [];
+    for (const file of files) {
+      results.push(await extractTextFromFile(file));
     }
 
-    let text = "";
-    if (mimeType === "application/pdf" || fileName.endsWith(".pdf")) {
-      const buffer = Buffer.from(await file.arrayBuffer());
-      text = await extractPdfText(buffer);
-
-      if (text.length < 20) {
-        return safeErrorResponse(
-          400,
-          "Couldn’t read this file. Try a clearer image or paste text.",
-          "PDF_TEXT_TOO_SHORT",
-        );
-      }
-    } else if (isSupportedImageType(mimeType) || /\.(png|jpg|jpeg)$/.test(fileName)) {
-      text = await ocrImageText(file);
-      if (!text) {
-        return safeErrorResponse(400, "Couldn’t read this file. Try a clearer image or paste text.", "OCR_EMPTY");
-      }
-    } else {
-      return safeErrorResponse(400, "Unsupported file type. Upload PDF, PNG, JPG, or JPEG.", "UNSUPPORTED_FILE_TYPE");
-    }
-
-    return NextResponse.json({ text }, { status: 200 });
+    return NextResponse.json({ results }, { status: 200 });
   } catch (error) {
     if (process.env.NODE_ENV === "development") {
       console.error("[import-file] failed:", error);
-    }
-
-    if (error instanceof Error && error.name === "EXTRACTION_NOT_CONFIGURED") {
-      return safeErrorResponse(
-        500,
-        "AI extraction is not configured. Add OPENAI_API_KEY to .env.local and restart npm run dev.",
-        "EXTRACTION_NOT_CONFIGURED",
-      );
     }
 
     return safeErrorResponse(500, "Couldn’t read this file. Try a clearer image or paste text.", "IMPORT_FAILED");
