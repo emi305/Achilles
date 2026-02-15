@@ -21,6 +21,46 @@ function clamp01(value: number) {
   return Math.max(0, Math.min(1, value));
 }
 
+function normalizeProxyWeakness(value: unknown): number | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (typeof value === "string") {
+    const lowered = value.trim().toLowerCase();
+    if (!lowered) {
+      return undefined;
+    }
+
+    if (/(below|low|left|lower)/.test(lowered)) {
+      return 0.85;
+    }
+
+    if (/(average|middle|mid|center)/.test(lowered)) {
+      return 0.5;
+    }
+
+    if (/(above|high|right|higher)/.test(lowered)) {
+      return 0.15;
+    }
+
+    const asNumber = Number(lowered.replace("%", ""));
+    if (Number.isFinite(asNumber)) {
+      const normalized = asNumber > 1 ? asNumber / 100 : asNumber;
+      return clamp01(normalized);
+    }
+
+    return undefined;
+  }
+
+  const numeric = toNumberOrUndefined(value);
+  if (typeof numeric !== "number") {
+    return undefined;
+  }
+
+  return clamp01(numeric > 1 ? numeric / 100 : numeric);
+}
+
 export function normalizePercentCorrect(row: ExtractedRow): number | null {
   const total = toNumberOrUndefined(row.total);
   const correct = toNumberOrUndefined(row.correct);
@@ -84,6 +124,7 @@ export function normalizeExtractedRow(row: ExtractedRow): ExtractedRow {
     total,
     correct,
     percentCorrect: normalizedPercent ?? undefined,
+    proxyWeakness: normalizeProxyWeakness(row.proxyWeakness),
   };
 }
 
@@ -224,11 +265,13 @@ export function expandCombinedCategories(row: ExtractedRow): ExtractedRow[] {
 
 function buildParsedRow(row: ExtractedRow): { parsedRow?: ParsedRow; warning?: string; missingRequired: boolean } {
   const normalizedRow = normalizeExtractedRow(row);
-  const matched = canonicalizeCategoryName(normalizedRow.categoryType, normalizedRow.name);
+  const nameForMatch = normalizedRow.mappedCanonicalName?.trim() || normalizedRow.name;
+  const matched = canonicalizeCategoryName(normalizedRow.categoryType, nameForMatch);
   const name = matched.canonicalName;
   const total = toNumberOrUndefined(normalizedRow.total);
   let correct = toNumberOrUndefined(normalizedRow.correct);
   const percentCorrect = toNumberOrUndefined(normalizedRow.percentCorrect);
+  const proxyWeakness = normalizeProxyWeakness(normalizedRow.proxyWeakness);
 
   if (typeof total === "number" && total <= 0) {
     return {
@@ -241,23 +284,36 @@ function buildParsedRow(row: ExtractedRow): { parsedRow?: ParsedRow; warning?: s
     correct = Math.round(percentCorrect * total);
   }
 
-  if (typeof total !== "number" || typeof correct !== "number") {
+  const hasQbankMetrics = typeof total === "number" && typeof correct === "number";
+  if (!hasQbankMetrics && typeof proxyWeakness !== "number") {
     return {
-      warning: `${name}: missing correct/total values.`,
+      warning: `${name}: missing both QBank metrics and score-report proxy weakness.`,
       missingRequired: true,
     };
   }
 
-  if (correct < 0 || correct > total) {
-    return {
-      warning: `${name}: correct must be between 0 and total.`,
-      missingRequired: true,
-    };
-  }
+  let qbankTotal: number | undefined;
+  let qbankCorrect: number | undefined;
+  let accuracy: number | undefined;
 
-  const accuracy = correct / total;
+  if (hasQbankMetrics) {
+    const safeTotal = total as number;
+    const safeCorrect = correct as number;
+
+    if (safeCorrect > safeTotal) {
+      return {
+        warning: `${name}: correct must be between 0 and total.`,
+        missingRequired: true,
+      };
+    }
+
+    qbankTotal = safeTotal;
+    qbankCorrect = safeCorrect;
+    accuracy = safeCorrect / safeTotal;
+  }
   const weight = getWeightForCategory(row.categoryType, name);
-  const roi = (1 - accuracy) * weight;
+  const roi = typeof accuracy === "number" ? (1 - accuracy) * weight : 0;
+  const proi = typeof proxyWeakness === "number" ? proxyWeakness * weight : 0;
 
   if (process.env.NODE_ENV === "development") {
     console.log(
@@ -269,11 +325,13 @@ function buildParsedRow(row: ExtractedRow): { parsedRow?: ParsedRow; warning?: s
     parsedRow: {
       categoryType: normalizedRow.categoryType,
       name,
-      correct,
-      total,
+      correct: qbankCorrect,
+      total: qbankTotal,
       accuracy,
       weight,
       roi,
+      proxyWeakness,
+      proi,
       originalName: normalizedRow.name,
       matchScore: matched.score,
       unmapped: matched.unmapped,

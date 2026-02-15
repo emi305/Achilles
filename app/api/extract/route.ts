@@ -28,9 +28,11 @@ Return JSON only with this exact shape:
     {
       "categoryType": "discipline" | "competency_domain" | "clinical_presentation",
       "name": string,
+      "mappedCanonicalName": string | null,
       "correct": number | null,
       "total": number | null,
       "percentCorrect": number | null,
+      "proxyWeakness": number | null,
       "confidence": number
     }
   ],
@@ -39,6 +41,10 @@ Return JSON only with this exact shape:
 
 Rules:
 - Extract only rows that reflect performance and include at least total questions or percent correct.
+- For score-report style data without correct/total, estimate proxyWeakness in 0..1 from performance-bar position:
+  - lower/below average -> high proxyWeakness (~0.75..1.0)
+  - average/mid -> medium (~0.35..0.65)
+  - higher/above average -> low (~0.0..0.25)
 - Map synonyms when possible:
   - IM/internal med/internal medicine -> Internal Medicine
   - OBGYN/Ob-Gyn -> Obstetrics/Gynecology
@@ -82,13 +88,18 @@ function sanitizeRows(input: unknown): ExtractedRow[] {
     const correct = toSafeNumber(candidate.correct);
     const total = toSafeNumber(candidate.total);
     const percentCorrect = toSafeNumber(candidate.percentCorrect);
+    const proxyWeakness = toSafeNumber(candidate.proxyWeakness);
+    const mappedCanonicalName =
+      typeof candidate.mappedCanonicalName === "string" ? candidate.mappedCanonicalName.trim() : undefined;
 
     rows.push({
       categoryType,
       name,
+      mappedCanonicalName,
       correct,
       total,
       percentCorrect,
+      proxyWeakness,
       confidence: Math.max(0, Math.min(1, confidence)),
     });
   }
@@ -162,12 +173,23 @@ export async function POST(request: Request) {
                         enum: ["discipline", "competency_domain", "clinical_presentation"],
                       },
                       name: { type: "string" },
+                      mappedCanonicalName: { type: ["string", "null"] },
                       correct: { type: ["number", "null"] },
                       total: { type: ["number", "null"] },
                       percentCorrect: { type: ["number", "null"] },
+                      proxyWeakness: { type: ["number", "null"] },
                       confidence: { type: "number" },
                     },
-                    required: ["categoryType", "name", "correct", "total", "percentCorrect", "confidence"],
+                    required: [
+                      "categoryType",
+                      "name",
+                      "mappedCanonicalName",
+                      "correct",
+                      "total",
+                      "percentCorrect",
+                      "proxyWeakness",
+                      "confidence",
+                    ],
                   },
                 },
                 warnings: {

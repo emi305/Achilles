@@ -3,11 +3,13 @@ export type CategoryType = "competency_domain" | "clinical_presentation" | "disc
 export type ParsedRow = {
   categoryType: CategoryType;
   name: string;
-  correct: number;
-  total: number;
-  accuracy: number;
+  correct?: number;
+  total?: number;
+  accuracy?: number;
   weight: number;
   roi: number;
+  proxyWeakness?: number;
+  proi?: number;
   originalName?: string;
   matchScore?: number;
   unmapped?: boolean;
@@ -16,9 +18,11 @@ export type ParsedRow = {
 export type ExtractedRow = {
   categoryType: CategoryType;
   name: string;
+  mappedCanonicalName?: string;
   correct?: number;
   total?: number;
   percentCorrect?: number;
+  proxyWeakness?: number;
   confidence: number;
 };
 
