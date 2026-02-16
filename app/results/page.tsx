@@ -218,26 +218,65 @@ type RankContext = {
   avgRank?: number;
 };
 
-function buildWhatToStudyBullets(row: DisplayRow, ranks: RankContext): string[] {
-  const openingOptions = [
-    `This category makes up ${formatPercent(row.weight)} of the test.`,
-    `${formatPercent(row.weight)} of the test sits in this category.`,
-    `This section accounts for ${formatPercent(row.weight)} of the test.`,
-  ];
-  const opening = openingOptions[(ranks.roiRank + (ranks.proiRank ?? 0) + (ranks.avgRank ?? 0)) % openingOptions.length];
+function buildWhatToStudyBullets(row: DisplayRow, ranks: RankContext, hasScoreReport: boolean): string[] {
+  const bullets: string[] = [];
+  bullets.push(`Makes up ${formatPercent(row.weight)} of the test.`);
 
-  const bullets = [
-    opening,
-    row.hasRoi
-      ? `ROI rank is #${ranks.roiRank} (${formatScore(row.roi)}), so improvements here can translate to strong gains.`
-      : "QBank ROI is limited for this category, so treat this as a secondary QBank target.",
-    typeof ranks.avgRank === "number"
-      ? `Avg % Correct rank is #${ranks.avgRank} at ${typeof row.avgCorrect === "number" ? formatPercent(row.avgCorrect) : "Not available"}, which sets urgency.`
-      : "No QBank Avg % Correct available (upload QBank data).",
-    row.hasProi
-      ? `Score report agrees (PROI rank #${ranks.proiRank}, value ${formatScore(row.proi)}).`
-      : "No score report PROI available for this category (upload score report).",
-  ];
+  const hasQbank = row.hasRoi || typeof row.avgCorrect === "number";
+  const hasScoreReportSignal = hasScoreReport && row.hasProi;
+
+  if (!hasQbank && !hasScoreReportSignal) {
+    bullets.push("Not enough data yet—add QBank or a score report to prioritize this accurately.");
+    return bullets;
+  }
+
+  const roiRank = ranks.roiRank;
+  const avgRank = ranks.avgRank;
+  const proiRank = ranks.proiRank;
+  const roiDriverScore = row.hasRoi && roiRank > 0 ? 1 / roiRank : 0;
+  const avgDriverScore = typeof avgRank === "number" && avgRank > 0 ? 1 / avgRank : 0;
+  const proiDriverScore = hasScoreReportSignal && typeof proiRank === "number" && proiRank > 0 ? 1 / proiRank : 0;
+  const maxDriverScore = Math.max(roiDriverScore, avgDriverScore, proiDriverScore);
+
+  if (row.hasRoi) {
+    let roiMeaning = "improvements here should pay off quickly.";
+    if (roiRank <= 3) {
+      roiMeaning = "this is a highest-impact ROI signal and likely one of your fastest returns per study hour.";
+    } else if (roiRank <= 5) {
+      roiMeaning = "this is a high ROI signal with strong expected return.";
+    } else if (maxDriverScore === roiDriverScore) {
+      roiMeaning = "ROI is the main driver here, so focused question reps should produce measurable gains.";
+    }
+    bullets.push(`ROI rank #${roiRank} (value ${formatScore(row.roi)}): ${roiMeaning}`);
+  }
+
+  if (typeof row.avgCorrect === "number" && typeof avgRank === "number") {
+    let avgMeaning = "this is lower than most categories, so it's a likely point gain.";
+    if (avgRank <= 5) {
+      avgMeaning = "this is one of your lowest averages and needs urgent review.";
+    } else if (maxDriverScore === avgDriverScore) {
+      avgMeaning = "lowest average is the main reason this moved up your priority list.";
+    }
+    bullets.push(`Avg % Correct rank #${avgRank} at ${formatPercent(row.avgCorrect)}: ${avgMeaning}`);
+  }
+
+  const shouldShowProi =
+    hasScoreReportSignal && typeof proiRank === "number" && (row.proi > 0 || proiRank <= 5);
+  if (shouldShowProi && typeof proiRank === "number") {
+    let proiMeaning = "your score report flagged this as a weaker area than expected.";
+    if (proiRank <= 3) {
+      proiMeaning = "this is one of your strongest score-report weakness flags.";
+    } else if (maxDriverScore === proiDriverScore) {
+      proiMeaning = "score-report signal is the main reason this deserves attention now.";
+    }
+    bullets.push(`Score report PROI rank #${proiRank} (value ${formatScore(row.proi)}): ${proiMeaning}`);
+  }
+
+  if (bullets.length === 1) {
+    if (row.weight >= 0.15) {
+      bullets.push("This is a large share of the test, so even modest gains can move your overall outcome.");
+    }
+  }
 
   return bullets;
 }
@@ -295,6 +334,7 @@ export default function ResultsPage() {
   const [chatError, setChatError] = useState("");
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const parsedRows = useSyncExternalStore(subscribeUploadSession, getClientParsedRows, getServerParsedRows);
+  const uploadSession = getUploadSession();
   const aggregated = useMemo(() => aggregateRows(parsedRows), [parsedRows]);
   const selectedTest = useMemo<TestType>(() => {
     const fromSession = getUploadSession()?.selectedTest;
@@ -325,6 +365,13 @@ export default function ResultsPage() {
   }, [aggregated, categoryOrder, rankingMode]);
 
   const topFive = useMemo(() => sortByFocusScore(aggregated).slice(0, 5), [aggregated]);
+  const hasScoreReport = useMemo(() => {
+    const sessionFlag = (uploadSession as { scoreReportProvided?: unknown } | null)?.scoreReportProvided;
+    if (typeof sessionFlag === "boolean") {
+      return sessionFlag;
+    }
+    return parsedRows.some((row) => typeof row.proxyWeakness === "number");
+  }, [parsedRows, uploadSession]);
   const zeusRows = useMemo<ZeusContextRow[]>(
     () =>
       aggregated.map((row) => ({
@@ -538,7 +585,7 @@ export default function ResultsPage() {
                   roiRank: roiRankMap.get(`${row.categoryType}::${row.name}`) ?? 0,
                   proiRank: proiRankMap.get(`${row.categoryType}::${row.name}`),
                   avgRank: avgRankMap.get(`${row.categoryType}::${row.name}`),
-                }).map((bullet) => (
+                }, hasScoreReport).map((bullet) => (
                   <li key={`${row.name}-study-${bullet}`}>{bullet}</li>
                 ))}
               </ul>
