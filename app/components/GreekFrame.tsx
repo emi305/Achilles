@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { ModeSelector } from "./ModeSelector";
 
 type GreekFrameProps = {
   children: ReactNode;
@@ -18,9 +19,12 @@ export function GreekFrame({ children }: GreekFrameProps) {
       </div>
 
       <div className="settings-link-wrap">
-        <Link href="/settings" className="settings-link">
-          Settings
-        </Link>
+        <div className="settings-link-stack">
+          <Link href="/settings" className="settings-link">
+            Settings
+          </Link>
+          <ModeSelector />
+        </div>
       </div>
 
       <main className="greek-main">

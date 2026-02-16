@@ -45,10 +45,18 @@ export async function POST(request: Request) {
       );
     }
 
-    const shouldAddGreeting = firstUserMessage && GREETING_REGEX.test(message);
+    const shouldAddGreeting = firstUserMessage || GREETING_REGEX.test(message);
+    const asksWeeklyPlan = /\b(week|weekly|7[- ]?day)\b/i.test(message);
+    const examInstruction =
+      context.exam === "usmle_step2"
+        ? "User is preparing for USMLE Step 2 CK. Use Disciplines, Systems, and Physician Tasks language. Do not use COMLEX terms like competency domain. Use Medicine (not Internal Medicine)."
+        : "User is preparing for COMLEX 2. Use Discipline, Competency Domain, and Clinical Presentation language. Mention OMM only when present in context.";
     const greetingInstruction = shouldAddGreeting
-      ? "The user's first message is a short greeting. Start with 1-2 warm, grand Zeus-style sentences, then continue directly into the required structured plan."
+      ? "Start with 1-2 warm, grand Zeus-style lines, then continue directly into the required structured plan."
       : "Do not add ceremonial introductions. Go straight into the required structured plan.";
+    const weeklyInstruction = asksWeeklyPlan
+      ? "For 'This Week', provide a concrete 7-day schedule with daily question and review targets."
+      : "For 'This Week', provide a concise weekly pattern with explicit daily question and review targets.";
 
     const model = process.env.OPENAI_MODEL ?? DEFAULT_MODEL;
     const response = await fetch(API_URL, {
@@ -64,11 +72,13 @@ export async function POST(request: Request) {
           {
             role: "system",
             content: [
-              "You are Zeus, an expert COMLEX Level 2 study coach.",
+              "You are Zeus, an expert medical board study coach.",
               "Use ONLY the provided context JSON (rows, rankings, topFive). Do not invent data.",
+              examInstruction,
               "If a requested metric is missing, explicitly say it is unavailable and tell the user what to upload.",
               "You must be operational, not generic. Focus on execution today.",
               greetingInstruction,
+              weeklyInstruction,
               "",
               "Always output these sections in this order:",
               "1) Today (exact plan)",
@@ -83,11 +93,12 @@ export async function POST(request: Request) {
               "- Include concrete deliverables: flashcard target and recurring-miss log target.",
               "- Include patch + retest loop: patch gap then short targeted re-test set.",
               "- Use ROI/PROI/Avg % Correct only to decide which categories get more question volume.",
+              "- Use at most 1-2 rank callouts per category.",
               "",
               "Default coaching framework (adapt numbers to user context):",
-              "- Qbank block: 2 timed sets of 20-25 questions each in top priority categories.",
+              "- Qbank block: 2 timed sets of 25-40 questions each in top priority categories.",
               "- Review block: deep review of every incorrect/guessed/flagged question.",
-              "- Patch block: 60-90 min targeted content only for recurring misses.",
+              "- Patch block: 30-45 min targeted content only for recurring misses.",
               "- Retest block: 10-15 targeted questions on patched topics the same day.",
               "",
               "Weekly split guidance:",

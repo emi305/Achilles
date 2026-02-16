@@ -11,7 +11,12 @@ import { parseAnyCsv } from "../lib/parseAnyCsv";
 import { clearReviewSession, setReviewSession } from "../lib/reviewSession";
 import { mergeScoreReportProxyRows, type ScoreReportProxyRow } from "../lib/scoreReportParse";
 import { setUploadSession } from "../lib/session";
-import { getSelectedTestFromLocalStorage } from "../lib/testSelection";
+import {
+  getSelectedTestFromLocalStorage,
+  getTestLabel,
+  isTestType,
+  SELECTED_TEST_CHANGED_EVENT,
+} from "../lib/testSelection";
 import type { ExtractResponse, ParsedRow, TestType } from "../lib/types";
 import type { TemplateId } from "../lib/templates";
 import {
@@ -28,6 +33,10 @@ function getInitialSettings() {
   const profiles = loadProfilesFromLocalStorage();
   const activeProfile = loadActiveProfileFromLocalStorage(profiles);
   return { profiles, activeProfile };
+}
+
+function resolveSelectedTest(): TestType {
+  return getSelectedTestFromLocalStorage();
 }
 
 type ExtractApiError = {
@@ -63,7 +72,8 @@ export default function UploadPage() {
   const [showAiSetupChecklist, setShowAiSetupChecklist] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analyzingDots, setAnalyzingDots] = useState(1);
-  const [selectedTest, setSelectedTest] = useState<TestType>(() => getSelectedTestFromLocalStorage());
+  const [selectedTest, setSelectedTest] = useState<TestType>(() => resolveSelectedTest());
+  const [modeChangedNotice, setModeChangedNotice] = useState("");
   const [profiles, setProfiles] = useState<ProfilesMap>(() => getInitialSettings().profiles);
   const [activeProfile, setActiveProfile] = useState(() => getInitialSettings().activeProfile);
 
@@ -79,13 +89,31 @@ export default function UploadPage() {
 
   useEffect(() => {
     const syncSelectedTest = () => {
-      setSelectedTest(getSelectedTestFromLocalStorage());
+      setSelectedTest(resolveSelectedTest());
     };
 
     syncSelectedTest();
     window.addEventListener("focus", syncSelectedTest);
-    return () => window.removeEventListener("focus", syncSelectedTest);
+    window.addEventListener("storage", syncSelectedTest);
+    window.addEventListener(SELECTED_TEST_CHANGED_EVENT, syncSelectedTest);
+    return () => {
+      window.removeEventListener("focus", syncSelectedTest);
+      window.removeEventListener("storage", syncSelectedTest);
+      window.removeEventListener(SELECTED_TEST_CHANGED_EVENT, syncSelectedTest);
+    };
   }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("modeChanged") !== "1") {
+      setModeChangedNotice("");
+      return;
+    }
+
+    const modeChangedExam = params.get("exam");
+    const modeChangedLabel = isTestType(modeChangedExam) ? getTestLabel(modeChangedExam) : getTestLabel(selectedTest);
+    setModeChangedNotice(`Mode changed. Please analyze data again for ${modeChangedLabel}.`);
+  }, [selectedTest]);
 
   useEffect(() => {
     if (!isAnalyzing) {
@@ -342,7 +370,9 @@ export default function UploadPage() {
         Upload screenshots and/or PDFs and/or text.
       </p>
 
-      <Card title="INPUT DATA">
+      {modeChangedNotice ? <Alert variant="info">{modeChangedNotice}</Alert> : null}
+
+      <Card title={`INPUT ${getTestLabel(selectedTest)} DATA`}>
         <div className="space-y-2">
           <label className="block text-sm font-medium text-stone-900" htmlFor="profile-select">
             Profile

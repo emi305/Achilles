@@ -50,6 +50,32 @@ body {
   z-index: 40;
 }
 
+.settings-link-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.mode-select-wrap {
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.mode-select-label {
+  font-weight: 600;
+}
+
+.mode-select-input {
+  border: none;
+  background: transparent;
+  color: rgb(87 83 78);
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+}
+
 .settings-link-wrap-left {
   right: auto;
   left: max(1rem, calc(var(--frame-side-space) - 0.25rem));

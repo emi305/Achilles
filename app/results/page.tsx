@@ -13,7 +13,7 @@ import {
   getServerParsedRows,
   subscribeUploadSession,
 } from "../lib/session";
-import { DEFAULT_TEST_TYPE } from "../lib/testSelection";
+import { DEFAULT_TEST_TYPE, getTestLabel } from "../lib/testSelection";
 import type { CategoryType, ParsedRow, TestType, ZeusContext, ZeusContextRow } from "../lib/types";
 import { getProiScore, getRoiScore, type RankingMode } from "../lib/priority";
 
@@ -473,7 +473,7 @@ export default function ResultsPage() {
 
       <Card>
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <h2 className="brand-title text-2xl font-semibold text-stone-900">Results</h2>
+          <h2 className="brand-title text-2xl font-semibold text-stone-900">RESULTS: {getTestLabel(selectedTest)}</h2>
           <div className="flex flex-wrap items-center gap-2 md:justify-center">
             {(Object.keys(modeLabels) as RankingMode[]).map((mode) => (
               <button
