@@ -17,7 +17,7 @@ export function runExpandCombinedCategoriesHarness() {
     confidence: 0.9,
   };
 
-  const splitRows = expandCombinedCategories(combined);
+  const splitRows = expandCombinedCategories(combined, "comlex2");
   assert(splitRows.length >= 2, "combined row should split into multiple canonical rows");
   assert(
     splitRows.reduce((sum, row) => sum + (row.total ?? 0), 0) === 100,
@@ -28,22 +28,22 @@ export function runExpandCombinedCategoriesHarness() {
     "split correct counts should preserve original correct",
   );
 
-  const direct = canonicalizeCategoryName("clinical_presentation", "Respiratory System");
+  const direct = canonicalizeCategoryName("clinical_presentation", "Respiratory System", "comlex2");
   assert(
     direct.canonicalName === "Patient Presentations Related to the Respiratory System",
     "respiratory should map directly",
   );
 
-  const tricky = canonicalizeCategoryName("clinical_presentation", "integumantary system");
+  const tricky = canonicalizeCategoryName("clinical_presentation", "integumantary system", "comlex2");
   assert(
     tricky.canonicalName === "Patient Presentations Related to the Integumentary System",
     "ocr variant should fuzzy-map to integumentary",
   );
 
-  const normalized = normalizeExtractRows([combined]);
+  const normalized = normalizeExtractRows([combined], "comlex2");
   assert(normalized.parsedRows.length >= 2, "normalized rows should include split rows");
   assert(
-    normalized.parsedRows.every((row) => row.weight > 0 || row.unmapped),
+    normalized.parsedRows.every((row) => (row.weight != null && row.weight > 0) || row.unmapped),
     "split rows should map to weighted keys where possible",
   );
 

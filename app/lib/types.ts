@@ -14,11 +14,14 @@ export type ParsedRow = {
   correct?: number;
   total?: number;
   accuracy?: number;
-  weight: number;
+  weight: number | null;
   roi: number;
   proxyWeakness?: number;
   proi?: number;
+  source?: import("./mappingCatalog").QbankSource;
   originalName?: string;
+  canonicalName?: string | null;
+  matchType?: "exact" | "alias" | "regex" | "fuzzy" | "none";
   matchScore?: number;
   unmapped?: boolean;
 };

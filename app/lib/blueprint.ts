@@ -57,17 +57,13 @@ function getStep2Weights(categoryType: CategoryType): Record<string, number> {
   return {};
 }
 
-export function getWeightMap(categoryType: CategoryType, testType: TestType = "comlex2"): Record<string, number> {
+export function getWeightMap(categoryType: CategoryType, testType: TestType): Record<string, number> {
   return testType === "usmle_step2" ? getStep2Weights(categoryType) : getComlexWeights(categoryType);
 }
 
-export function getWeightForCategory(
-  categoryType: CategoryType,
-  name: string,
-  testType: TestType = "comlex2",
-): number {
+export function getWeightForCategory(categoryType: CategoryType, name: string, testType: TestType): number | null {
   const map = getWeightMap(categoryType, testType);
-  return map[name] ?? 0;
+  return map[name] ?? null;
 }
 
 export function getCategoryOrderForTest(testType: TestType): CategoryType[] {

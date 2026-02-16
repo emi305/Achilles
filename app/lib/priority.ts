@@ -29,6 +29,8 @@ export function sortRowsByMode<
   mode: RankingMode,
 ): T[] {
   return [...rows].sort((a, b) => {
+    const aWeight = a.weight ?? 0;
+    const bWeight = b.weight ?? 0;
     const aRoi = getRoiScore(a);
     const bRoi = getRoiScore(b);
     const aWeakness = getWeaknessScore(a);
@@ -38,8 +40,8 @@ export function sortRowsByMode<
       if (bWeakness !== aWeakness) {
         return bWeakness - aWeakness;
       }
-      if (b.weight !== a.weight) {
-        return b.weight - a.weight;
+      if (bWeight !== aWeight) {
+        return bWeight - aWeight;
       }
       return a.name.localeCompare(b.name);
     }
@@ -47,8 +49,8 @@ export function sortRowsByMode<
     if (bRoi !== aRoi) {
       return bRoi - aRoi;
     }
-    if (b.weight !== a.weight) {
-      return b.weight - a.weight;
+    if (bWeight !== aWeight) {
+      return bWeight - aWeight;
     }
     return a.name.localeCompare(b.name);
   });

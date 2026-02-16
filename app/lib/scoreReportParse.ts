@@ -19,6 +19,50 @@ type OpenAIChatResponse = {
   }>;
 };
 
+function normalizeCategoryTypeToken(value: string): string {
+  return value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+function coerceCategoryType(value: string, testType: TestType): CategoryType | null {
+  const token = normalizeCategoryTypeToken(value);
+  const allowed = new Set(getAllowedCategoryTypes(testType));
+
+  if (allowed.has(token as CategoryType)) {
+    return token as CategoryType;
+  }
+
+  if (testType === "comlex2") {
+    if (token === "competency_domain" || token === "competency_domains" || token === "competency") {
+      return "competency_domain";
+    }
+    if (token === "clinical_presentation" || token === "clinical_presentations" || token === "clinical") {
+      return "clinical_presentation";
+    }
+    if (token === "discipline" || token === "disciplines") {
+      return "discipline";
+    }
+  }
+
+  if (testType === "usmle_step2") {
+    if (token === "system" || token === "systems") {
+      return "system";
+    }
+    if (
+      token === "physician_task" ||
+      token === "physician_tasks" ||
+      token === "task" ||
+      token === "tasks"
+    ) {
+      return "physician_task";
+    }
+    if (token === "discipline" || token === "disciplines") {
+      return "discipline";
+    }
+  }
+
+  return null;
+}
+
 function clamp01(value: number) {
   return Math.max(0, Math.min(1, value));
 }
@@ -40,16 +84,15 @@ function parseScoreReportRows(content: string, testType: TestType): ScoreReportP
 
   const rows = Array.isArray(parsed.rows) ? parsed.rows : [];
   const normalized: ScoreReportProxyRow[] = [];
-  const allowedCategoryTypes = new Set(getAllowedCategoryTypes(testType));
-
   for (const row of rows) {
-    const categoryType = row.categoryType;
+    const categoryTypeRaw = typeof row.categoryType === "string" ? row.categoryType : "";
+    const categoryType = coerceCategoryType(categoryTypeRaw, testType);
     const name = typeof row.name === "string" ? row.name.trim() : "";
     const proxyWeakness = typeof row.proxyWeakness === "number" ? clamp01(row.proxyWeakness) : undefined;
 
-    if (typeof categoryType === "string" && allowedCategoryTypes.has(categoryType as CategoryType) && name && typeof proxyWeakness === "number") {
+    if (categoryType && name && typeof proxyWeakness === "number") {
       normalized.push({
-        categoryType: categoryType as CategoryType,
+        categoryType,
         name,
         proxyWeakness,
       });
@@ -59,7 +102,7 @@ function parseScoreReportRows(content: string, testType: TestType): ScoreReportP
   return normalized;
 }
 
-export async function parseScoreReport(file: File, testType: TestType = "comlex2"): Promise<ScoreReportProxyRow[]> {
+export async function parseScoreReport(file: File, testType: TestType): Promise<ScoreReportProxyRow[]> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     const error = new Error("OPENAI_API_KEY missing.");
@@ -135,15 +178,21 @@ function proxyKey(categoryType: CategoryType, name: string) {
 export function mergeScoreReportProxyRows(
   parsedRows: ParsedRow[],
   proxyRows: ScoreReportProxyRow[],
-  testType: TestType = "comlex2",
+  testType: TestType,
 ): ParsedRow[] {
   if (proxyRows.length === 0) {
-    return parsedRows;
+    return parsedRows.map((row) => ({
+      ...row,
+      testType,
+    }));
   }
 
   const normalizedProxyMap = new Map<string, ScoreReportProxyRow>();
   for (const proxyRow of proxyRows) {
     const canonical = canonicalizeCategoryName(proxyRow.categoryType, proxyRow.name, testType).canonicalName;
+    if (!canonical) {
+      continue;
+    }
     normalizedProxyMap.set(proxyKey(proxyRow.categoryType, canonical), {
       ...proxyRow,
       name: canonical,
@@ -153,7 +202,7 @@ export function mergeScoreReportProxyRows(
 
   const usedKeys = new Set<string>();
   const mergedRows = parsedRows.map((row) => {
-    const canonical = canonicalizeCategoryName(row.categoryType, row.name, row.testType ?? testType).canonicalName;
+    const canonical = canonicalizeCategoryName(row.categoryType, row.name, row.testType ?? testType).canonicalName ?? row.name;
     const key = proxyKey(row.categoryType, canonical);
     const proxy = normalizedProxyMap.get(key);
 
@@ -167,7 +216,7 @@ export function mergeScoreReportProxyRows(
       ...row,
       testType: row.testType ?? testType,
       proxyWeakness,
-      proi: proxyWeakness * row.weight,
+      proi: proxyWeakness * (row.weight ?? 0),
     };
   });
 
@@ -180,12 +229,17 @@ export function mergeScoreReportProxyRows(
     const proxyWeakness = clamp01(proxy.proxyWeakness);
     mergedRows.push({
       testType,
+      source: "unknown",
       categoryType: proxy.categoryType,
       name: proxy.name,
+      canonicalName: proxy.name,
       weight,
       roi: 0,
       proxyWeakness,
-      proi: proxyWeakness * weight,
+      proi: proxyWeakness * (weight ?? 0),
+      unmapped: weight == null,
+      matchType: weight == null ? "none" : "exact",
+      matchScore: weight == null ? 0 : 1,
     });
   }
 

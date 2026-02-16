@@ -1,121 +1,14 @@
 import { getCategoryCandidates } from "./blueprint";
+import { MAPPING_CATALOG, type QbankSource } from "./mappingCatalog";
 import type { CategoryType, TestType } from "./types";
 
-type MatchResult = {
-  canonicalName: string;
-  score: number;
-  unmapped: boolean;
+export type MatchResult = {
+  canonicalName: string | null;
+  matchType: "exact" | "alias" | "regex" | "fuzzy" | "none";
+  matchScore: number;
 };
 
-const MATCH_THRESHOLD = 0.82;
-
-const COMLEX_ALIASES: Record<string, string> = {
-  im: "Internal Medicine",
-  "internal med": "Internal Medicine",
-  "internal medicine": "Internal Medicine",
-  obgyn: "Obstetrics/Gynecology",
-  "ob/gyn": "Obstetrics/Gynecology",
-  "ob gyn": "Obstetrics/Gynecology",
-  psych: "Psychiatry",
-  peds: "Pediatrics",
-  ed: "Emergency Medicine",
-  em: "Emergency Medicine",
-  msk: "Patient Presentations Related to the Musculoskeletal System",
-  gi: "Patient Presentations Related to the Gastrointestinal System and Nutritional Health",
-  gu: "Patient Presentations Related to the Genitourinary System",
-  genitourinary: "Patient Presentations Related to the Genitourinary System",
-  renal: "Patient Presentations Related to the Genitourinary System",
-  urinary: "Patient Presentations Related to the Genitourinary System",
-  breast: "Patient Presentations Related to Human Development, Reproduction, and Sexuality",
-  breasts: "Patient Presentations Related to Human Development, Reproduction, and Sexuality",
-  resp: "Patient Presentations Related to the Respiratory System",
-  "respiratory system": "Patient Presentations Related to the Respiratory System",
-  "musculoskeletal system": "Patient Presentations Related to the Musculoskeletal System",
-  integument: "Patient Presentations Related to the Integumentary System",
-  integumentary: "Patient Presentations Related to the Integumentary System",
-  "integumantsru system": "Patient Presentations Related to the Integumentary System",
-  "heme onc": "Patient Presentations Related to the Circulatory and Hematologic Systems",
-  hematology: "Patient Presentations Related to the Circulatory and Hematologic Systems",
-  ent: "Patient Presentations Related to the Respiratory System",
-  ophtho: "Patient Presentations Related to the Nervous System and Mental Health",
-  opp: "Osteopathic Principles and Practice",
-  omm: "Osteopathic Principles and Practice",
-};
-
-const STEP2_ALIASES: Record<string, string> = {
-  medicine: "Medicine",
-  med: "Medicine",
-  im: "Medicine",
-  "internal med": "Medicine",
-  "internal medicine": "Medicine",
-  "medicine internal": "Medicine",
-  "adult medicine": "Medicine",
-  obgyn: "Obstetrics & Gynecology",
-  "ob/gyn": "Obstetrics & Gynecology",
-  "ob gyn": "Obstetrics & Gynecology",
-  "ob gyn ": "Obstetrics & Gynecology",
-  obstetrics: "Obstetrics & Gynecology",
-  gynecology: "Obstetrics & Gynecology",
-  "women s health": "Obstetrics & Gynecology",
-  "women health": "Obstetrics & Gynecology",
-  gyn: "Obstetrics & Gynecology",
-  peds: "Pediatrics",
-  psych: "Psychiatry",
-  msk: "Musculoskeletal System & Skin",
-  musculoskeletal: "Musculoskeletal System & Skin",
-  "musculoskeletal skin": "Musculoskeletal System & Skin",
-  "msk/derm": "Musculoskeletal System & Skin",
-  skin: "Musculoskeletal System & Skin",
-  derm: "Musculoskeletal System & Skin",
-  dermatology: "Musculoskeletal System & Skin",
-  ethics: "Social Sciences (Ethics/Safety/Legal)",
-  "patient safety": "Social Sciences (Ethics/Safety/Legal)",
-  legal: "Social Sciences (Ethics/Safety/Legal)",
-  "quality safety": "Social Sciences (Ethics/Safety/Legal)",
-  "quality improvement": "Social Sciences (Ethics/Safety/Legal)",
-  qi: "Social Sciences (Ethics/Safety/Legal)",
-  communication: "Social Sciences (Ethics/Safety/Legal)",
-  professionalism: "Social Sciences (Ethics/Safety/Legal)",
-  "social science": "Social Sciences (Ethics/Safety/Legal)",
-  "social sciences": "Social Sciences (Ethics/Safety/Legal)",
-  social: "Social Sciences (Ethics/Safety/Legal)",
-  renal: "Renal/Urinary & Reproductive",
-  gu: "Renal/Urinary & Reproductive",
-  genitourinary: "Renal/Urinary & Reproductive",
-  urology: "Renal/Urinary & Reproductive",
-  urinary: "Renal/Urinary & Reproductive",
-  repro: "Renal/Urinary & Reproductive",
-  reproductive: "Renal/Urinary & Reproductive",
-  "renal/gu": "Renal/Urinary & Reproductive",
-  "gu/repro": "Renal/Urinary & Reproductive",
-  cardio: "Cardiovascular System",
-  cardiovascular: "Cardiovascular System",
-  cv: "Cardiovascular System",
-  pulm: "Respiratory System",
-  pulmonary: "Respiratory System",
-  respiratory: "Respiratory System",
-  gi: "Gastrointestinal System",
-  gastrointestinal: "Gastrointestinal System",
-  management: "Patient Care: Management",
-  treatment: "Patient Care: Management",
-  therapy: "Patient Care: Management",
-  intervention: "Patient Care: Management",
-  "patient care management": "Patient Care: Management",
-  "patient care - management": "Patient Care: Management",
-  "patient care: management": "Patient Care: Management",
-  "patient care management ": "Patient Care: Management",
-  diagnosis: "Patient Care: Diagnosis",
-  diagnostic: "Patient Care: Diagnosis",
-  workup: "Patient Care: Diagnosis",
-  evaluation: "Patient Care: Diagnosis",
-  "patient care diagnosis": "Patient Care: Diagnosis",
-  "patient care - diagnosis": "Patient Care: Diagnosis",
-  "patient care: diagnosis": "Patient Care: Diagnosis",
-  prevention: "Health Maintenance & Disease Prevention",
-  "health maintenance": "Health Maintenance & Disease Prevention",
-  screening: "Health Maintenance & Disease Prevention",
-  counseling: "Health Maintenance & Disease Prevention",
-};
+const MATCH_THRESHOLD = 0.84;
 
 function normalizeForMatch(name: string): string {
   return name
@@ -125,6 +18,47 @@ function normalizeForMatch(name: string): string {
     .replace(/[^a-z0-9\s/&:()-]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function normalizeComlexClinicalPresentation(raw: string): string {
+  let normalized = raw
+    .replace(/\bpatient presentations? related to (the )?/gi, "")
+    .replace(/\bpatient presentation related to (the )?/gi, "")
+    .replace(/\s*&\s*/g, " and ")
+    .replace(/\bsystems\b/g, "system")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // Keep the wellness canonical phrase matchable from shortened NBOME/TrueLearn labels.
+  if (normalized === "community health") {
+    normalized = "community health and wellness";
+  }
+
+  return normalized;
+}
+
+function getNormalizedCandidates(
+  rawName: string,
+  categoryType: CategoryType,
+  testType: TestType,
+): string[] {
+  const base = normalizeForMatch(rawName);
+  const candidates = new Set<string>();
+
+  if (base) {
+    candidates.add(base);
+  }
+
+  if (testType === "comlex2" && categoryType === "clinical_presentation") {
+    const stripped = normalizeForMatch(normalizeComlexClinicalPresentation(rawName));
+    if (stripped) {
+      candidates.add(stripped);
+      candidates.add(stripped.replace(/\bsystems\b/g, "system"));
+      candidates.add(stripped.replace(/\b(system)\b/g, "systems"));
+    }
+  }
+
+  return Array.from(candidates);
 }
 
 function simplifyForSimilarity(name: string): string {
@@ -141,7 +75,6 @@ function levenshteinDistance(a: string, b: string): number {
   if (bLen === 0) return aLen;
 
   const matrix: number[][] = Array.from({ length: aLen + 1 }, () => Array(bLen + 1).fill(0));
-
   for (let i = 0; i <= aLen; i += 1) matrix[i][0] = i;
   for (let j = 0; j <= bLen; j += 1) matrix[0][j] = j;
 
@@ -164,80 +97,117 @@ function similarity(a: string, b: string): number {
   }
   const distance = levenshteinDistance(a, b);
   const maxLen = Math.max(a.length, b.length);
-  if (maxLen === 0) {
-    return 1;
-  }
-  return 1 - distance / maxLen;
+  return maxLen === 0 ? 1 : 1 - distance / maxLen;
 }
 
-function getAliasMap(testType: TestType): Record<string, string> {
-  return testType === "usmle_step2" ? STEP2_ALIASES : COMLEX_ALIASES;
+function getCatalog(testType: TestType, categoryType: CategoryType) {
+  return MAPPING_CATALOG[testType]?.[categoryType] ?? {};
 }
 
-type FuzzyCandidate = {
-  source: string;
-  canonicalName: string;
-};
-
-function getFuzzyCandidates(categoryType: CategoryType, testType: TestType): FuzzyCandidate[] {
-  const canonicalCandidates = getCategoryCandidates(categoryType, testType);
-  const allowedCanonical = new Set(canonicalCandidates);
-  const fuzzyCandidates: FuzzyCandidate[] = canonicalCandidates.map((canonicalName) => ({
-    source: canonicalName,
-    canonicalName,
-  }));
-
-  const aliasMap = getAliasMap(testType);
-  for (const [alias, canonicalName] of Object.entries(aliasMap)) {
-    if (!allowedCanonical.has(canonicalName)) {
+function tryRegexMatch(catalog: ReturnType<typeof getCatalog>, rawNormalized: string): MatchResult | null {
+  for (const [canonicalName, meta] of Object.entries(catalog)) {
+    if (!meta) {
       continue;
     }
-    fuzzyCandidates.push({
-      source: alias,
-      canonicalName,
-    });
+    const regexPatterns = meta.regex ?? [];
+    for (const pattern of regexPatterns) {
+      try {
+        const re = new RegExp(pattern, "i");
+        if (re.test(rawNormalized)) {
+          return { canonicalName, matchType: "regex", matchScore: 0.95 };
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+  return null;
+}
+
+function tryAliasMatch(
+  catalog: ReturnType<typeof getCatalog>,
+  normalizedCandidates: string[],
+  source: QbankSource,
+): MatchResult | null {
+  for (const [canonicalName, meta] of Object.entries(catalog)) {
+    if (!meta) {
+      continue;
+    }
+    const sourceAliases = meta.bySource?.[source] ?? [];
+    for (const alias of sourceAliases) {
+      if (normalizedCandidates.includes(normalizeForMatch(alias))) {
+        return { canonicalName, matchType: "alias", matchScore: 1 };
+      }
+    }
   }
 
-  return fuzzyCandidates;
+  for (const [canonicalName, meta] of Object.entries(catalog)) {
+    if (!meta) {
+      continue;
+    }
+    for (const alias of meta.aliases) {
+      if (normalizedCandidates.includes(normalizeForMatch(alias))) {
+        return { canonicalName, matchType: "alias", matchScore: 0.98 };
+      }
+    }
+  }
+
+  return null;
 }
 
 export function canonicalizeCategoryName(
   categoryType: CategoryType,
   rawName: string,
-  testType: TestType = "comlex2",
+  testType: TestType,
+  source: QbankSource = "unknown",
 ): MatchResult {
+  if (!testType) {
+    throw new Error("canonicalizeCategoryName requires testType.");
+  }
+
   const trimmed = rawName.trim();
   if (!trimmed) {
-    return { canonicalName: "", score: 0, unmapped: true };
+    return { canonicalName: null, matchType: "none", matchScore: 0 };
   }
 
-  const normalizedRaw = normalizeForMatch(trimmed);
-  const aliasMatch = getAliasMap(testType)[normalizedRaw];
-  if (aliasMatch) {
-    return { canonicalName: aliasMatch, score: 1, unmapped: false };
-  }
+  const normalizedCandidates = getNormalizedCandidates(trimmed, categoryType, testType);
+  const catalog = getCatalog(testType, categoryType);
 
-  const candidates = getFuzzyCandidates(categoryType, testType);
-  if (candidates.length === 0) {
-    return { canonicalName: trimmed, score: 0, unmapped: true };
-  }
-
-  const similarityRaw = simplifyForSimilarity(trimmed);
-  let bestName = trimmed;
-  let bestScore = 0;
-
-  for (const candidate of candidates) {
-    const candidateSimplified = simplifyForSimilarity(candidate.source);
-    const score = similarity(similarityRaw, candidateSimplified);
-    if (score > bestScore) {
-      bestScore = score;
-      bestName = candidate.canonicalName;
+  for (const canonicalName of Object.keys(catalog)) {
+    if (normalizedCandidates.includes(normalizeForMatch(canonicalName))) {
+      return { canonicalName, matchType: "exact", matchScore: 1 };
     }
   }
 
-  if (bestScore >= MATCH_THRESHOLD) {
-    return { canonicalName: bestName, score: bestScore, unmapped: false };
+  const aliasMatch = tryAliasMatch(catalog, normalizedCandidates, source);
+  if (aliasMatch) {
+    return aliasMatch;
   }
 
-  return { canonicalName: trimmed, score: bestScore, unmapped: true };
+  for (const candidate of normalizedCandidates) {
+    const regexMatch = tryRegexMatch(catalog, candidate);
+    if (regexMatch) {
+      return regexMatch;
+    }
+  }
+
+  // Fuzzy fallback remains strictly within same exam + categoryType canonical candidates.
+  const candidates = getCategoryCandidates(categoryType, testType);
+  let bestName: string | null = null;
+  let bestScore = 0;
+  const similarityRaw = simplifyForSimilarity(trimmed);
+
+  for (const candidate of candidates) {
+    const score = similarity(similarityRaw, simplifyForSimilarity(candidate));
+    if (score > bestScore) {
+      bestScore = score;
+      bestName = candidate;
+    }
+  }
+
+  if (bestName && bestScore >= MATCH_THRESHOLD) {
+    return { canonicalName: bestName, matchType: "fuzzy", matchScore: bestScore };
+  }
+
+  return { canonicalName: null, matchType: "none", matchScore: bestScore };
 }

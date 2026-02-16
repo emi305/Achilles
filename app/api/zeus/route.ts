@@ -25,6 +25,20 @@ function safeErrorResponse(status: number, message: string, error?: string) {
   return NextResponse.json({ error, message }, { status });
 }
 
+function stripExplicitDurations(text: string): string {
+  const withoutDurations = text
+    .replace(/\b\d+\s*(?:-|to)\s*\d+\s*(?:minutes?|mins?|min|hours?|hrs?|hr)\b/gi, "timed block")
+    .replace(/\b\d+(?:\.\d+)?\s*(?:minutes?|mins?|min|hours?|hrs?|hr)\b/gi, "timed")
+    .replace(/\b(?:minutes?|mins?|min|hours?|hrs?|hr)\b/gi, "timed");
+
+  return withoutDurations
+    .split("\n")
+    .map((line) => line.replace(/[ \t]{2,}/g, " ").replace(/[ \t]+$/g, ""))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as ZeusRequest;
@@ -77,18 +91,32 @@ export async function POST(request: Request) {
               examInstruction,
               "If a requested metric is missing, explicitly say it is unavailable and tell the user what to upload.",
               "You must be operational, not generic. Focus on execution today.",
+              "Output MUST be valid Markdown.",
+              "Use this exact structure and order:",
+              "1) Opening line (1 sentence max, Zeus voice)",
+              "2) blank line",
+              "3) ## Today",
+              "4) bullet lines only",
+              "5) blank line",
+              "6) ## This Week",
+              "7) bullet lines only",
+              "8) blank line",
+              "9) ## Focus Areas",
+              "10) bullet lines only",
+              "11) blank line",
+              "12) ## Tracking Targets",
+              "13) bullet lines only",
+              "Every bullet must start with '- ' and be on its own line.",
+              "Do not output run-on paragraphs. No inline numbered chains like '1) ... 2) ...'.",
+              "Keep each line under ~120 characters; split long points into extra bullet lines.",
               greetingInstruction,
               weeklyInstruction,
-              "",
-              "Always output these sections in this order:",
-              "1) Today (exact plan)",
-              "2) This Week",
-              "3) Focus Areas (from context top priorities)",
-              "4) Tracking Targets",
+              "Do not include any explicit time durations. Never mention minutes/hours.",
+              "Use 'timed' or 'timed block' phrasing instead of duration values.",
               "",
               "Hard requirements for every answer:",
               "- Include exact question counts (for example, total daily Q target and per-block Q counts).",
-              "- Include exact time blocks in minutes.",
+              "- Do not include minutes/hours anywhere in the response.",
               "- Include explicit review rules: review incorrect + guessed + flagged.",
               "- Include concrete deliverables: flashcard target and recurring-miss log target.",
               "- Include patch + retest loop: patch gap then short targeted re-test set.",
@@ -98,7 +126,7 @@ export async function POST(request: Request) {
               "Default coaching framework (adapt numbers to user context):",
               "- Qbank block: 2 timed sets of 25-40 questions each in top priority categories.",
               "- Review block: deep review of every incorrect/guessed/flagged question.",
-              "- Patch block: 30-45 min targeted content only for recurring misses.",
+              "- Patch block: targeted review for recurring misses.",
               "- Retest block: 10-15 targeted questions on patched topics the same day.",
               "",
               "Weekly split guidance:",
@@ -121,7 +149,8 @@ export async function POST(request: Request) {
     }
 
     const json = (await response.json()) as OpenAIChatResponse;
-    const reply = (json.choices?.[0]?.message?.content ?? "").trim();
+    const rawReply = (json.choices?.[0]?.message?.content ?? "").trim();
+    const reply = stripExplicitDurations(rawReply);
     if (!reply) {
       return safeErrorResponse(500, "Zeus couldn't respond. Try again.", "ZEUS_EMPTY_REPLY");
     }

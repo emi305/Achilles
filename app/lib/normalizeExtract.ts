@@ -1,5 +1,6 @@
 import { getWeightForCategory } from "./blueprint";
 import { canonicalizeCategoryName } from "./nameMatching";
+import type { QbankSource } from "./mappingCatalog";
 import type { ExtractedRow, NormalizedExtractResult, ParsedRow, TestType } from "./types";
 
 function toNumberOrUndefined(value: unknown): number | undefined {
@@ -200,10 +201,10 @@ function getWeightsForStrategy(
   rows: Array<{ categoryType: ParsedRow["categoryType"]; name: string }>,
   testType: TestType,
 ): number[] {
-  return rows.map((row) => getWeightForCategory(row.categoryType, row.name, testType));
+  return rows.map((row) => getWeightForCategory(row.categoryType, row.name, testType) ?? 0);
 }
 
-export function expandCombinedCategories(row: ExtractedRow, testType: TestType = "comlex2"): ExtractedRow[] {
+export function expandCombinedCategories(row: ExtractedRow, testType: TestType): ExtractedRow[] {
   const normalizedRow = normalizeExtractedRow(row);
   if (!shouldAttemptSplit(normalizedRow.name)) {
     return [normalizedRow];
@@ -222,9 +223,9 @@ export function expandCombinedCategories(row: ExtractedRow, testType: TestType =
 
   const mapped = parts
     .map((part) => canonicalizeCategoryName(normalizedRow.categoryType, part, testType))
-    .filter((entry) => !entry.unmapped);
+    .filter((entry) => entry.matchType !== "none" && entry.canonicalName);
 
-  const uniqueNames = Array.from(new Set(mapped.map((entry) => entry.canonicalName)));
+  const uniqueNames = Array.from(new Set(mapped.map((entry) => entry.canonicalName as string)));
   if (uniqueNames.length < 2) {
     return [normalizedRow];
   }
@@ -269,11 +270,13 @@ export function expandCombinedCategories(row: ExtractedRow, testType: TestType =
 function buildParsedRow(
   row: ExtractedRow,
   testType: TestType,
+  source: QbankSource = "unknown",
 ): { parsedRow?: ParsedRow; warning?: string; missingRequired: boolean } {
   const normalizedRow = normalizeExtractedRow(row);
   const nameForMatch = normalizedRow.mappedCanonicalName?.trim() || normalizedRow.name;
-  const matched = canonicalizeCategoryName(normalizedRow.categoryType, nameForMatch, testType);
-  const name = matched.canonicalName;
+  const matched = canonicalizeCategoryName(normalizedRow.categoryType, nameForMatch, testType, source);
+  const canonicalName = matched.canonicalName;
+  const displayName = canonicalName ?? normalizedRow.name;
   const total = toNumberOrUndefined(normalizedRow.total);
   let correct = toNumberOrUndefined(normalizedRow.correct);
   const percentCorrect = toNumberOrUndefined(normalizedRow.percentCorrect);
@@ -281,7 +284,7 @@ function buildParsedRow(
 
   if (typeof total === "number" && total <= 0) {
     return {
-      warning: `${name}: total must be greater than 0.`,
+      warning: `${displayName}: total must be greater than 0.`,
       missingRequired: true,
     };
   }
@@ -293,7 +296,7 @@ function buildParsedRow(
   const hasQbankMetrics = typeof total === "number" && typeof correct === "number";
   if (!hasQbankMetrics && typeof proxyWeakness !== "number") {
     return {
-      warning: `${name}: missing both QBank metrics and score-report proxy weakness.`,
+      warning: `${displayName}: missing both QBank metrics and score-report proxy weakness.`,
       missingRequired: true,
     };
   }
@@ -308,7 +311,7 @@ function buildParsedRow(
 
     if (safeCorrect > safeTotal) {
       return {
-        warning: `${name}: correct must be between 0 and total.`,
+        warning: `${displayName}: correct must be between 0 and total.`,
         missingRequired: true,
       };
     }
@@ -317,20 +320,22 @@ function buildParsedRow(
     qbankCorrect = safeCorrect;
     accuracy = safeCorrect / safeTotal;
   }
-  const weight = getWeightForCategory(row.categoryType, name, testType);
-  const roi = typeof accuracy === "number" ? (1 - accuracy) * weight : 0;
-  const proi = typeof proxyWeakness === "number" ? proxyWeakness * weight : 0;
+  const weight = canonicalName ? getWeightForCategory(row.categoryType, canonicalName, testType) : null;
+  const roi = typeof accuracy === "number" ? (1 - accuracy) * (weight ?? 0) : 0;
+  const proi = typeof proxyWeakness === "number" ? proxyWeakness * (weight ?? 0) : 0;
 
   if (process.env.NODE_ENV === "development") {
     console.log(
-      `[normalizeExtract] ${normalizedRow.categoryType}: "${normalizedRow.name}" -> "${name}" (score=${matched.score.toFixed(3)}, unmapped=${matched.unmapped})`,
+      `[normalizeExtract] ${normalizedRow.categoryType}: "${normalizedRow.name}" -> "${canonicalName ?? "UNMAPPED"}" (score=${matched.matchScore.toFixed(3)}, matchType=${matched.matchType})`,
     );
   }
 
   return {
     parsedRow: {
       categoryType: normalizedRow.categoryType,
-      name,
+      source,
+      name: canonicalName ?? normalizedRow.name,
+      canonicalName,
       testType,
       correct: qbankCorrect,
       total: qbankTotal,
@@ -340,16 +345,19 @@ function buildParsedRow(
       proxyWeakness,
       proi,
       originalName: normalizedRow.name,
-      matchScore: matched.score,
-      unmapped: matched.unmapped,
+      matchType: matched.matchType,
+      matchScore: matched.matchScore,
+      unmapped: matched.matchType === "none" || weight == null,
     },
     warning:
-      matched.unmapped || weight === 0 ? `${normalizedRow.name}: not confidently mapped; weight may be 0.` : undefined,
+      matched.matchType === "none" || weight == null
+        ? `${normalizedRow.name}: not confidently mapped; excluded from weighted ranking.`
+        : undefined,
     missingRequired: false,
   };
 }
 
-export function normalizeExtractRows(rows: ExtractedRow[], testType: TestType = "comlex2"): NormalizedExtractResult {
+export function normalizeExtractRows(rows: ExtractedRow[], testType: TestType): NormalizedExtractResult {
   const warnings: string[] = [];
   const parsedRows: ParsedRow[] = [];
   let hasMissingRequired = false;
@@ -358,7 +366,7 @@ export function normalizeExtractRows(rows: ExtractedRow[], testType: TestType = 
     const expandedRows = expandCombinedCategories(row, testType);
 
     for (const expandedRow of expandedRows) {
-      const result = buildParsedRow(expandedRow, testType);
+      const result = buildParsedRow(expandedRow, testType, "unknown");
       if (result.warning) {
         warnings.push(result.warning);
       }

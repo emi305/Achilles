@@ -3,6 +3,7 @@ import { DEFAULT_TEST_TYPE, isTestType } from "./testSelection";
 
 export type UploadSessionData = {
   selectedTest: TestType;
+  scoreReportProvided?: boolean;
   pastedCsv: string;
   parsedRows: ParsedRow[];
   savedAt: string;
@@ -140,6 +141,7 @@ export function getUploadSession(): UploadSessionData | null {
 
     return {
       selectedTest,
+      scoreReportProvided: typeof parsed.scoreReportProvided === "boolean" ? parsed.scoreReportProvided : undefined,
       pastedCsv: typeof parsed.pastedCsv === "string" ? parsed.pastedCsv : "",
       parsedRows,
       savedAt: typeof parsed.savedAt === "string" ? parsed.savedAt : new Date().toISOString(),

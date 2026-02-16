@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
+import { Alert } from "../components/Alert";
 import { BrandHeader } from "../components/BrandHeader";
 import { Card } from "../components/Card";
 import { CATEGORY_LABEL_BY_TYPE, getCategoryOrderForTest } from "../lib/blueprint";
@@ -48,6 +49,14 @@ type AccumulatorRow = {
   qbankTotalSum: number;
   qbankAccuracySum: number;
   qbankAccuracyCount: number;
+};
+
+type UnmappedRowGroup = {
+  originalName: string;
+  categoryType: CategoryType;
+  source: string;
+  count: number;
+  examples: string[];
 };
 
 const modeLabels: Record<RankingMode, string> = {
@@ -151,6 +160,9 @@ function aggregateRows(rows: ParsedRow[]): DisplayRow[] {
   const byKey = new Map<string, AccumulatorRow>();
 
   for (const row of rows) {
+    if (row.unmapped || row.weight == null) {
+      continue;
+    }
     const key = `${row.categoryType}::${row.name}`;
     const roi = getRoiScore(row);
     const hasProi = typeof row.proxyWeakness === "number" || typeof row.proi === "number";
@@ -366,12 +378,49 @@ export default function ResultsPage() {
 
   const topFive = useMemo(() => sortByFocusScore(aggregated).slice(0, 5), [aggregated]);
   const hasScoreReport = useMemo(() => {
-    const sessionFlag = (uploadSession as { scoreReportProvided?: unknown } | null)?.scoreReportProvided;
+    const sessionFlag = uploadSession?.scoreReportProvided;
     if (typeof sessionFlag === "boolean") {
       return sessionFlag;
     }
     return parsedRows.some((row) => typeof row.proxyWeakness === "number");
   }, [parsedRows, uploadSession]);
+  const unmappedGroups = useMemo<UnmappedRowGroup[]>(() => {
+    const map = new Map<string, UnmappedRowGroup>();
+    for (const row of parsedRows) {
+      if (!row.unmapped && row.weight != null) {
+        continue;
+      }
+      const originalName = row.originalName ?? row.name;
+      const source = row.source ?? "unknown";
+      const key = `${originalName}::${row.categoryType}::${source}`;
+      const existing = map.get(key);
+      if (!existing) {
+        map.set(key, {
+          originalName,
+          categoryType: row.categoryType,
+          source,
+          count: 1,
+          examples: [row.name],
+        });
+        continue;
+      }
+      existing.count += 1;
+      if (existing.examples.length < 3 && !existing.examples.includes(row.name)) {
+        existing.examples.push(row.name);
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => b.count - a.count);
+  }, [parsedRows]);
+  const mappingFailureRate = useMemo(() => {
+    const qbankRows = parsedRows.filter(
+      (row) => typeof row.accuracy === "number" || (typeof row.correct === "number" && typeof row.total === "number"),
+    );
+    if (qbankRows.length === 0) {
+      return 0;
+    }
+    const failed = qbankRows.filter((row) => row.weight == null || row.unmapped).length;
+    return failed / qbankRows.length;
+  }, [parsedRows]);
   const zeusRows = useMemo<ZeusContextRow[]>(
     () =>
       aggregated.map((row) => ({
@@ -556,6 +605,12 @@ export default function ResultsPage() {
         </div>
       </Card>
 
+      {mappingFailureRate > 0.05 ? (
+        <Alert variant="error">
+          {`Mapping failed — many categories could not be matched to the ${getTestLabel(selectedTest)} blueprint. This is a bug. Please re-upload or report.`}
+        </Alert>
+      ) : null}
+
       <Card title="Achilles Insight">
         <ul className="space-y-4 text-sm text-stone-800">
           {topFive.map((row) => (
@@ -593,6 +648,35 @@ export default function ResultsPage() {
           ))}
         </ul>
       </Card>
+
+      {unmappedGroups.length > 0 ? (
+        <Card title="Unmapped Categories">
+          <div className="overflow-x-auto">
+            <table className="min-w-full border-collapse text-sm">
+              <thead>
+                <tr className="border-b border-stone-200 text-left text-xs uppercase tracking-wide text-stone-600">
+                  <th className="px-3 py-2">Original Name</th>
+                  <th className="px-3 py-2">Category Type</th>
+                  <th className="px-3 py-2">Source</th>
+                  <th className="px-3 py-2">Count</th>
+                  <th className="px-3 py-2">Example Rows</th>
+                </tr>
+              </thead>
+              <tbody>
+                {unmappedGroups.map((group) => (
+                  <tr key={`${group.originalName}-${group.categoryType}-${group.source}`} className="border-b border-stone-100 last:border-0">
+                    <td className="px-3 py-2 text-stone-900">{group.originalName}</td>
+                    <td className="px-3 py-2 text-stone-700">{group.categoryType}</td>
+                    <td className="px-3 py-2 text-stone-700">{group.source}</td>
+                    <td className="px-3 py-2 text-stone-700">{group.count}</td>
+                    <td className="px-3 py-2 text-stone-700">{group.examples.join(" | ")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      ) : null}
 
       <div className="flex justify-center">
         <button

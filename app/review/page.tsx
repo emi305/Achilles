@@ -56,7 +56,7 @@ function deriveRowValues(row: ExtractedRow, testType: TestType) {
     error: undefined,
     accuracy,
     weight,
-    roi: (1 - accuracy) * weight,
+    roi: weight == null ? undefined : (1 - accuracy) * weight,
   };
 }
 
@@ -114,6 +114,7 @@ export default function ReviewPage() {
 
     setUploadSession({
       selectedTest,
+      scoreReportProvided: normalized.parsedRows.some((row) => typeof row.proxyWeakness === "number"),
       pastedCsv: reviewSession.rawText,
       parsedRows: normalized.parsedRows,
       savedAt: new Date().toISOString(),
@@ -206,7 +207,7 @@ export default function ReviewPage() {
                       />
                     </td>
                     <td className="px-2 py-2">{derived.accuracy !== undefined ? formatPercent(derived.accuracy) : "-"}</td>
-                    <td className="px-2 py-2">{formatPercent(derived.weight)}</td>
+                    <td className="px-2 py-2">{derived.weight == null ? "-" : formatPercent(derived.weight)}</td>
                     <td className="px-2 py-2">{derived.roi !== undefined ? derived.roi.toFixed(4) : "-"}</td>
                     <td className="px-2 py-2">{formatPercent(row.confidence)}</td>
                     <td className="px-2 py-2">

@@ -48,11 +48,11 @@ export function ModeSelector() {
             return;
           }
 
+          clearUploadSession();
           setSelectedTestInLocalStorage(nextValue);
           setTestType(nextValue);
 
           if (pathname === "/results") {
-            clearUploadSession();
             router.push(`/upload?modeChanged=1&exam=${nextValue}`);
           }
         }}

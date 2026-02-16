@@ -345,13 +345,30 @@ export default function UploadPage() {
         return;
       }
 
-      const mergedRows = mergeScoreReportProxyRows(parsedRows, scoreReportProxyRows, selectedTest).map((row) => ({
+      const examRows = parsedRows.map((row) => ({
         ...row,
-        testType: row.testType ?? selectedTest,
+        testType: selectedTest,
       }));
+      const mergedRows = mergeScoreReportProxyRows(examRows, scoreReportProxyRows, selectedTest).map((row) => ({
+        ...row,
+        testType: selectedTest,
+      }));
+      if (process.env.NODE_ENV === "development") {
+        console.log(
+          "[Analyze][debug] first parsed rows:",
+          mergedRows.slice(0, 10).map((row) => ({
+            rawName: row.originalName ?? row.name,
+            canonicalName: row.name,
+            categoryType: row.categoryType,
+            testType: row.testType,
+            weight: row.weight,
+          })),
+        );
+      }
       clearReviewSession();
       setUploadSession({
         selectedTest,
+        scoreReportProvided: scoreReportProxyRows.length > 0,
         pastedCsv: combinedText,
         parsedRows: mergedRows,
         savedAt: new Date().toISOString(),

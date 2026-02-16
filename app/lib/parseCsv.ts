@@ -1,4 +1,5 @@
 import { getWeightForCategory } from "./blueprint";
+import { detectSourceFromHeaders } from "./detectSource";
 import { canonicalizeCategoryName } from "./nameMatching";
 import type { CategoryType, ParsedRow, TestType } from "./types";
 
@@ -60,7 +61,7 @@ export function splitCsvLine(line: string): string[] {
   return fields;
 }
 
-export function parseCsv(csvText: string, testType: TestType = "comlex2"): ParsedRow[] {
+export function parseCsv(csvText: string, testType: TestType): ParsedRow[] {
   const lines = csvText
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -80,6 +81,7 @@ export function parseCsv(csvText: string, testType: TestType = "comlex2"): Parse
   }
 
   const parsedRows: ParsedRow[] = [];
+  const source = detectSourceFromHeaders(headerParts);
 
   for (let index = 1; index < lines.length; index += 1) {
     const lineNumber = index + 1;
@@ -113,15 +115,21 @@ export function parseCsv(csvText: string, testType: TestType = "comlex2"): Parse
     }
 
     const accuracy = correct / total;
-    const matched = canonicalizeCategoryName(categoryTypeRaw, nameRaw, testType);
-    const canonicalName = matched.canonicalName || nameRaw;
-    const weight = getWeightForCategory(categoryTypeRaw, canonicalName, testType);
-    const roi = (1 - accuracy) * weight;
+    const matched = canonicalizeCategoryName(categoryTypeRaw, nameRaw, testType, source);
+    const canonicalName = matched.canonicalName;
+    const weight = canonicalName ? getWeightForCategory(categoryTypeRaw, canonicalName, testType) : null;
+    const roi = (1 - accuracy) * (weight ?? 0);
 
     parsedRows.push({
       testType,
+      source,
       categoryType: categoryTypeRaw,
-      name: canonicalName,
+      name: canonicalName ?? nameRaw,
+      canonicalName,
+      originalName: nameRaw,
+      matchType: matched.matchType,
+      matchScore: matched.matchScore,
+      unmapped: matched.matchType === "none" || weight == null,
       correct,
       total,
       accuracy,
