@@ -11,7 +11,8 @@ import { parseAnyCsv } from "../lib/parseAnyCsv";
 import { clearReviewSession, setReviewSession } from "../lib/reviewSession";
 import { mergeScoreReportProxyRows, type ScoreReportProxyRow } from "../lib/scoreReportParse";
 import { setUploadSession } from "../lib/session";
-import type { ExtractResponse, ParsedRow } from "../lib/types";
+import { getSelectedTestFromLocalStorage } from "../lib/testSelection";
+import type { ExtractResponse, ParsedRow, TestType } from "../lib/types";
 import type { TemplateId } from "../lib/templates";
 import {
   DEFAULT_SETTINGS,
@@ -62,6 +63,7 @@ export default function UploadPage() {
   const [showAiSetupChecklist, setShowAiSetupChecklist] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analyzingDots, setAnalyzingDots] = useState(1);
+  const [selectedTest, setSelectedTest] = useState<TestType>(() => getSelectedTestFromLocalStorage());
   const [profiles, setProfiles] = useState<ProfilesMap>(() => getInitialSettings().profiles);
   const [activeProfile, setActiveProfile] = useState(() => getInitialSettings().activeProfile);
 
@@ -74,6 +76,16 @@ export default function UploadPage() {
   useEffect(() => {
     saveProfilesToLocalStorage(profiles);
   }, [profiles]);
+
+  useEffect(() => {
+    const syncSelectedTest = () => {
+      setSelectedTest(getSelectedTestFromLocalStorage());
+    };
+
+    syncSelectedTest();
+    window.addEventListener("focus", syncSelectedTest);
+    return () => window.removeEventListener("focus", syncSelectedTest);
+  }, []);
 
   useEffect(() => {
     if (!isAnalyzing) {
@@ -104,6 +116,7 @@ export default function UploadPage() {
       const parsedRows = parseAnyCsv(inputText, {
         template: selectedTemplate,
         defaultCategoryType,
+        testType: selectedTest,
       });
 
       if (parsedRows.length === 0) {
@@ -129,7 +142,7 @@ export default function UploadPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          exam: "comlex2",
+          exam: selectedTest,
           rawText: inputText,
         }),
       });
@@ -146,7 +159,7 @@ export default function UploadPage() {
 
       const extracted = (await response.json()) as ExtractResponse;
       const normalizedExtractedRows = extracted.rows.map((row) => normalizeExtractedRow(row));
-      const normalized = normalizeExtractRows(normalizedExtractedRows);
+      const normalized = normalizeExtractRows(normalizedExtractedRows, selectedTest);
       const combinedWarnings = [...extracted.warnings, ...normalized.warnings];
       const debugReview =
         typeof window !== "undefined" && new URLSearchParams(window.location.search).get("debug") === "1";
@@ -237,6 +250,7 @@ export default function UploadPage() {
     for (const file of scoreReportFiles) {
       formData.append("scoreReports", file);
     }
+    formData.append("exam", selectedTest);
 
     const response = await fetch("/api/score-report", {
       method: "POST",
@@ -303,9 +317,13 @@ export default function UploadPage() {
         return;
       }
 
-      const mergedRows = mergeScoreReportProxyRows(parsedRows, scoreReportProxyRows);
+      const mergedRows = mergeScoreReportProxyRows(parsedRows, scoreReportProxyRows, selectedTest).map((row) => ({
+        ...row,
+        testType: row.testType ?? selectedTest,
+      }));
       clearReviewSession();
       setUploadSession({
+        selectedTest,
         pastedCsv: combinedText,
         parsedRows: mergedRows,
         savedAt: new Date().toISOString(),

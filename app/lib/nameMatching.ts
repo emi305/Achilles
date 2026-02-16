@@ -1,9 +1,5 @@
-import {
-  CLINICAL_PRESENTATION_WEIGHTS,
-  COMPETENCY_DOMAIN_WEIGHTS,
-  DISCIPLINE_WEIGHTS,
-} from "./comlexWeights";
-import type { CategoryType } from "./types";
+import { getCategoryCandidates } from "./blueprint";
+import type { CategoryType, TestType } from "./types";
 
 type MatchResult = {
   canonicalName: string;
@@ -13,13 +9,7 @@ type MatchResult = {
 
 const MATCH_THRESHOLD = 0.82;
 
-const CATEGORY_CANDIDATES: Record<CategoryType, string[]> = {
-  discipline: Object.keys(DISCIPLINE_WEIGHTS),
-  competency_domain: Object.keys(COMPETENCY_DOMAIN_WEIGHTS),
-  clinical_presentation: Object.keys(CLINICAL_PRESENTATION_WEIGHTS),
-};
-
-const COMMON_ALIASES: Record<string, string> = {
+const COMLEX_ALIASES: Record<string, string> = {
   im: "Internal Medicine",
   "internal med": "Internal Medicine",
   "internal medicine": "Internal Medicine",
@@ -52,13 +42,58 @@ const COMMON_ALIASES: Record<string, string> = {
   omm: "Osteopathic Principles and Practice",
 };
 
+const STEP2_ALIASES: Record<string, string> = {
+  med: "Medicine",
+  im: "Medicine",
+  "internal med": "Medicine",
+  "internal medicine": "Medicine",
+  obgyn: "Obstetrics & Gynecology",
+  "ob/gyn": "Obstetrics & Gynecology",
+  "ob gyn": "Obstetrics & Gynecology",
+  obstetrics: "Obstetrics & Gynecology",
+  gynecology: "Obstetrics & Gynecology",
+  gyn: "Obstetrics & Gynecology",
+  peds: "Pediatrics",
+  psych: "Psychiatry",
+  msk: "Musculoskeletal System & Skin",
+  musculoskeletal: "Musculoskeletal System & Skin",
+  skin: "Musculoskeletal System & Skin",
+  derm: "Musculoskeletal System & Skin",
+  ethics: "Social Sciences (Ethics/Safety/Legal)",
+  "patient safety": "Social Sciences (Ethics/Safety/Legal)",
+  legal: "Social Sciences (Ethics/Safety/Legal)",
+  professionalism: "Social Sciences (Ethics/Safety/Legal)",
+  social: "Social Sciences (Ethics/Safety/Legal)",
+  renal: "Renal/Urinary & Reproductive",
+  gu: "Renal/Urinary & Reproductive",
+  urinary: "Renal/Urinary & Reproductive",
+  repro: "Renal/Urinary & Reproductive",
+  reproductive: "Renal/Urinary & Reproductive",
+  "patient care management": "Patient Care: Management",
+  "patient care - management": "Patient Care: Management",
+  "patient care: management": "Patient Care: Management",
+  "patient care management ": "Patient Care: Management",
+  "patient care diagnosis": "Patient Care: Diagnosis",
+  "patient care - diagnosis": "Patient Care: Diagnosis",
+  "patient care: diagnosis": "Patient Care: Diagnosis",
+  prevention: "Health Maintenance & Disease Prevention",
+  "health maintenance": "Health Maintenance & Disease Prevention",
+  screening: "Health Maintenance & Disease Prevention",
+};
+
 function normalizeForMatch(name: string): string {
   return name
     .toLowerCase()
     .replace(/rn/g, "m")
     .replace(/[|]/g, "l")
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\b(patient|presentations|presentation|related|to|the|system|practice|and|of)\b/g, " ")
+    .replace(/[^a-z0-9\s/&:()-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function simplifyForSimilarity(name: string): string {
+  return normalizeForMatch(name)
+    .replace(/\b(patient|presentations|presentation|related|to|the|and|of)\b/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -99,22 +134,38 @@ function similarity(a: string, b: string): number {
   return 1 - distance / maxLen;
 }
 
-export function canonicalizeCategoryName(categoryType: CategoryType, rawName: string): MatchResult {
-  const trimmed = rawName.trim();
-  const normalizedRaw = normalizeForMatch(trimmed);
+function getAliasMap(testType: TestType): Record<string, string> {
+  return testType === "usmle_step2" ? STEP2_ALIASES : COMLEX_ALIASES;
+}
 
-  const aliasMatch = COMMON_ALIASES[normalizedRaw];
+export function canonicalizeCategoryName(
+  categoryType: CategoryType,
+  rawName: string,
+  testType: TestType = "comlex2",
+): MatchResult {
+  const trimmed = rawName.trim();
+  if (!trimmed) {
+    return { canonicalName: "", score: 0, unmapped: true };
+  }
+
+  const normalizedRaw = normalizeForMatch(trimmed);
+  const aliasMatch = getAliasMap(testType)[normalizedRaw];
   if (aliasMatch) {
     return { canonicalName: aliasMatch, score: 1, unmapped: false };
   }
 
-  const candidates = CATEGORY_CANDIDATES[categoryType];
+  const candidates = getCategoryCandidates(categoryType, testType);
+  if (candidates.length === 0) {
+    return { canonicalName: trimmed, score: 0, unmapped: true };
+  }
+
+  const similarityRaw = simplifyForSimilarity(trimmed);
   let bestName = trimmed;
   let bestScore = 0;
 
   for (const candidate of candidates) {
-    const candidateNormalized = normalizeForMatch(candidate);
-    const score = similarity(normalizedRaw, candidateNormalized);
+    const candidateSimplified = simplifyForSimilarity(candidate);
+    const score = similarity(similarityRaw, candidateSimplified);
     if (score > bestScore) {
       bestScore = score;
       bestName = candidate;

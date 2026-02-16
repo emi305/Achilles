@@ -1,6 +1,14 @@
-export type CategoryType = "competency_domain" | "clinical_presentation" | "discipline";
+export type TestType = "comlex2" | "usmle_step2";
+
+export type CategoryType =
+  | "competency_domain"
+  | "clinical_presentation"
+  | "discipline"
+  | "system"
+  | "physician_task";
 
 export type ParsedRow = {
+  testType?: TestType;
   categoryType: CategoryType;
   name: string;
   correct?: number;
@@ -62,7 +70,7 @@ export type ZeusRankedItem = {
 };
 
 export type ZeusContext = {
-  exam: string;
+  exam: TestType;
   rows: ZeusContextRow[];
   topFive: ZeusContextRow[];
   roiRanking: ZeusRankedItem[];

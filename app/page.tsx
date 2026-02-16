@@ -3,8 +3,10 @@
 import Link from "next/link";
 import { useState } from "react";
 import { BrandHeader } from "./components/BrandHeader";
+import { setSelectedTestInLocalStorage } from "./lib/testSelection";
+import type { TestType } from "./lib/types";
 
-type ExamOption = "" | "comlex2";
+type ExamOption = "" | TestType;
 
 export default function HomePage() {
   const [exam, setExam] = useState<ExamOption>("");
@@ -21,21 +23,23 @@ export default function HomePage() {
             onChange={(event) => {
               const value = event.target.value as ExamOption;
               setExam(value);
+              if (value) {
+                setSelectedTestInLocalStorage(value);
+              }
             }}
             className="w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 sm:w-64"
           >
             <option value="">Select...</option>
             <option value="comlex2">Comlex 2</option>
-            <option value="usmle" disabled className="text-stone-500">
-              USMLE coming soon..
-            </option>
+            <option value="usmle_step2">USMLE Step 2</option>
           </select>
         </div>
 
-        {exam === "comlex2" ? (
+        {exam ? (
           <div className="mt-6 text-center">
             <Link
               href="/upload"
+              onClick={() => setSelectedTestInLocalStorage(exam)}
               className="inline-flex items-center rounded-md bg-stone-800 px-5 py-2.5 text-sm font-semibold text-amber-50 transition hover:bg-stone-700"
             >
               Get started

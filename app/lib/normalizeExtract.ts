@@ -1,6 +1,6 @@
-import { getWeightForCategory } from "./comlexWeights";
+import { getWeightForCategory } from "./blueprint";
 import { canonicalizeCategoryName } from "./nameMatching";
-import type { ExtractedRow, NormalizedExtractResult, ParsedRow } from "./types";
+import type { ExtractedRow, NormalizedExtractResult, ParsedRow, TestType } from "./types";
 
 function toNumberOrUndefined(value: unknown): number | undefined {
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -196,11 +196,14 @@ function shouldAttemptSplit(name: string): boolean {
   return /\/|&|\sand\s/i.test(name);
 }
 
-function getWeightsForStrategy(rows: Array<{ categoryType: ParsedRow["categoryType"]; name: string }>): number[] {
-  return rows.map((row) => getWeightForCategory(row.categoryType, row.name));
+function getWeightsForStrategy(
+  rows: Array<{ categoryType: ParsedRow["categoryType"]; name: string }>,
+  testType: TestType,
+): number[] {
+  return rows.map((row) => getWeightForCategory(row.categoryType, row.name, testType));
 }
 
-export function expandCombinedCategories(row: ExtractedRow): ExtractedRow[] {
+export function expandCombinedCategories(row: ExtractedRow, testType: TestType = "comlex2"): ExtractedRow[] {
   const normalizedRow = normalizeExtractedRow(row);
   if (!shouldAttemptSplit(normalizedRow.name)) {
     return [normalizedRow];
@@ -218,7 +221,7 @@ export function expandCombinedCategories(row: ExtractedRow): ExtractedRow[] {
   }
 
   const mapped = parts
-    .map((part) => canonicalizeCategoryName(normalizedRow.categoryType, part))
+    .map((part) => canonicalizeCategoryName(normalizedRow.categoryType, part, testType))
     .filter((entry) => !entry.unmapped);
 
   const uniqueNames = Array.from(new Set(mapped.map((entry) => entry.canonicalName)));
@@ -231,7 +234,7 @@ export function expandCombinedCategories(row: ExtractedRow): ExtractedRow[] {
     name,
   }));
 
-  const weightShares = getWeightsForStrategy(splitSkeleton);
+  const weightShares = getWeightsForStrategy(splitSkeleton, testType);
   const canUseWeightStrategy = weightShares.every((weight) => weight > 0);
   const strategyShares = canUseWeightStrategy ? weightShares : splitSkeleton.map(() => 1);
   const strategyLabel = canUseWeightStrategy ? "weight" : "equal";
@@ -263,10 +266,13 @@ export function expandCombinedCategories(row: ExtractedRow): ExtractedRow[] {
   return expandedRows;
 }
 
-function buildParsedRow(row: ExtractedRow): { parsedRow?: ParsedRow; warning?: string; missingRequired: boolean } {
+function buildParsedRow(
+  row: ExtractedRow,
+  testType: TestType,
+): { parsedRow?: ParsedRow; warning?: string; missingRequired: boolean } {
   const normalizedRow = normalizeExtractedRow(row);
   const nameForMatch = normalizedRow.mappedCanonicalName?.trim() || normalizedRow.name;
-  const matched = canonicalizeCategoryName(normalizedRow.categoryType, nameForMatch);
+  const matched = canonicalizeCategoryName(normalizedRow.categoryType, nameForMatch, testType);
   const name = matched.canonicalName;
   const total = toNumberOrUndefined(normalizedRow.total);
   let correct = toNumberOrUndefined(normalizedRow.correct);
@@ -311,7 +317,7 @@ function buildParsedRow(row: ExtractedRow): { parsedRow?: ParsedRow; warning?: s
     qbankCorrect = safeCorrect;
     accuracy = safeCorrect / safeTotal;
   }
-  const weight = getWeightForCategory(row.categoryType, name);
+  const weight = getWeightForCategory(row.categoryType, name, testType);
   const roi = typeof accuracy === "number" ? (1 - accuracy) * weight : 0;
   const proi = typeof proxyWeakness === "number" ? proxyWeakness * weight : 0;
 
@@ -325,6 +331,7 @@ function buildParsedRow(row: ExtractedRow): { parsedRow?: ParsedRow; warning?: s
     parsedRow: {
       categoryType: normalizedRow.categoryType,
       name,
+      testType,
       correct: qbankCorrect,
       total: qbankTotal,
       accuracy,
@@ -342,16 +349,16 @@ function buildParsedRow(row: ExtractedRow): { parsedRow?: ParsedRow; warning?: s
   };
 }
 
-export function normalizeExtractRows(rows: ExtractedRow[]): NormalizedExtractResult {
+export function normalizeExtractRows(rows: ExtractedRow[], testType: TestType = "comlex2"): NormalizedExtractResult {
   const warnings: string[] = [];
   const parsedRows: ParsedRow[] = [];
   let hasMissingRequired = false;
 
   for (const row of rows) {
-    const expandedRows = expandCombinedCategories(row);
+    const expandedRows = expandCombinedCategories(row, testType);
 
     for (const expandedRow of expandedRows) {
-      const result = buildParsedRow(expandedRow);
+      const result = buildParsedRow(expandedRow, testType);
       if (result.warning) {
         warnings.push(result.warning);
       }

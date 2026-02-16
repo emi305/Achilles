@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { parseScoreReport, type ScoreReportProxyRow } from "../../lib/scoreReportParse";
+import { isTestType } from "../../lib/testSelection";
+import type { TestType } from "../../lib/types";
 
 export const runtime = "nodejs";
 
@@ -39,6 +41,8 @@ export async function POST(request: Request) {
     const formData = await request.formData();
     const filesRaw = formData.getAll("scoreReports");
     const fallback = formData.get("scoreReport");
+    const examValue = formData.get("exam");
+    const exam: TestType = isTestType(examValue) ? examValue : "comlex2";
     const files = filesRaw.filter((value): value is File => value instanceof File);
 
     if (files.length === 0 && fallback instanceof File) {
@@ -69,7 +73,7 @@ export async function POST(request: Request) {
       }
 
       try {
-        const rows = await parseScoreReport(file);
+        const rows = await parseScoreReport(file, exam);
         results.push({ filename: file.name, ok: true, rows });
         mergedRows.push(...rows);
       } catch (error) {

@@ -9,8 +9,9 @@ import { Card } from "../components/Card";
 import { normalizeExtractRows } from "../lib/normalizeExtract";
 import { clearReviewSession, getReviewSession } from "../lib/reviewSession";
 import { setUploadSession } from "../lib/session";
-import { getWeightForCategory } from "../lib/comlexWeights";
-import type { CategoryType, ExtractedRow } from "../lib/types";
+import { getWeightForCategory } from "../lib/blueprint";
+import { getSelectedTestFromLocalStorage } from "../lib/testSelection";
+import type { CategoryType, ExtractedRow, TestType } from "../lib/types";
 
 function formatPercent(value: number) {
   return `${(value * 100).toFixed(1)}%`;
@@ -25,7 +26,7 @@ function parseNumberInput(value: string): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-function deriveRowValues(row: ExtractedRow) {
+function deriveRowValues(row: ExtractedRow, testType: TestType) {
   const total = row.total;
   const correct = row.correct ?? (typeof row.percentCorrect === "number" && typeof total === "number"
     ? Math.round(row.percentCorrect * total)
@@ -35,7 +36,7 @@ function deriveRowValues(row: ExtractedRow) {
     return {
       error: "Enter valid correct and total values.",
       accuracy: undefined,
-      weight: getWeightForCategory(row.categoryType, row.name),
+      weight: getWeightForCategory(row.categoryType, row.name, testType),
       roi: undefined,
     };
   }
@@ -44,13 +45,13 @@ function deriveRowValues(row: ExtractedRow) {
     return {
       error: "Correct must be between 0 and total.",
       accuracy: undefined,
-      weight: getWeightForCategory(row.categoryType, row.name),
+      weight: getWeightForCategory(row.categoryType, row.name, testType),
       roi: undefined,
     };
   }
 
   const accuracy = correct / total;
-  const weight = getWeightForCategory(row.categoryType, row.name);
+  const weight = getWeightForCategory(row.categoryType, row.name, testType);
   return {
     error: undefined,
     accuracy,
@@ -71,11 +72,12 @@ const DEFAULT_ROW: ExtractedRow = {
 export default function ReviewPage() {
   const router = useRouter();
   const reviewSession = getReviewSession();
+  const selectedTest: TestType = getSelectedTestFromLocalStorage();
   const [rows, setRows] = useState<ExtractedRow[]>(() => reviewSession?.extracted.rows ?? []);
   const [errorMessage, setErrorMessage] = useState("");
 
-  const rowDerivations = useMemo(() => rows.map((row) => deriveRowValues(row)), [rows]);
-  const normalized = useMemo(() => normalizeExtractRows(rows), [rows]);
+  const rowDerivations = useMemo(() => rows.map((row) => deriveRowValues(row, selectedTest)), [rows, selectedTest]);
+  const normalized = useMemo(() => normalizeExtractRows(rows, selectedTest), [rows, selectedTest]);
   const hasInlineErrors = rowDerivations.some((entry) => Boolean(entry.error));
 
   if (!reviewSession) {
@@ -111,6 +113,7 @@ export default function ReviewPage() {
     }
 
     setUploadSession({
+      selectedTest,
       pastedCsv: reviewSession.rawText,
       parsedRows: normalized.parsedRows,
       savedAt: new Date().toISOString(),
@@ -166,6 +169,8 @@ export default function ReviewPage() {
                         <option value="discipline">discipline</option>
                         <option value="competency_domain">competency_domain</option>
                         <option value="clinical_presentation">clinical_presentation</option>
+                        <option value="system">system</option>
+                        <option value="physician_task">physician_task</option>
                       </select>
                     </td>
                     <td className="px-2 py-2">

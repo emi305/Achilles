@@ -1,6 +1,6 @@
-import { getWeightForCategory } from "./comlexWeights";
+import { getAllowedCategoryTypes, getWeightForCategory } from "./blueprint";
 import { canonicalizeCategoryName } from "./nameMatching";
-import type { CategoryType, ParsedRow } from "./types";
+import type { CategoryType, ParsedRow, TestType } from "./types";
 
 const API_URL = "https://api.openai.com/v1/chat/completions";
 const DEFAULT_MODEL = "gpt-4.1-mini";
@@ -32,7 +32,7 @@ function stripJsonCodeFence(value: string): string {
   return trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
 }
 
-function parseScoreReportRows(content: string): ScoreReportProxyRow[] {
+function parseScoreReportRows(content: string, testType: TestType): ScoreReportProxyRow[] {
   const cleaned = stripJsonCodeFence(content);
   const parsed = JSON.parse(cleaned) as {
     rows?: Array<{ categoryType?: string; name?: string; proxyWeakness?: number }>;
@@ -40,21 +40,16 @@ function parseScoreReportRows(content: string): ScoreReportProxyRow[] {
 
   const rows = Array.isArray(parsed.rows) ? parsed.rows : [];
   const normalized: ScoreReportProxyRow[] = [];
+  const allowedCategoryTypes = new Set(getAllowedCategoryTypes(testType));
 
   for (const row of rows) {
     const categoryType = row.categoryType;
     const name = typeof row.name === "string" ? row.name.trim() : "";
     const proxyWeakness = typeof row.proxyWeakness === "number" ? clamp01(row.proxyWeakness) : undefined;
 
-    if (
-      (categoryType === "discipline" ||
-        categoryType === "competency_domain" ||
-        categoryType === "clinical_presentation") &&
-      name &&
-      typeof proxyWeakness === "number"
-    ) {
+    if (typeof categoryType === "string" && allowedCategoryTypes.has(categoryType as CategoryType) && name && typeof proxyWeakness === "number") {
       normalized.push({
-        categoryType,
+        categoryType: categoryType as CategoryType,
         name,
         proxyWeakness,
       });
@@ -64,7 +59,7 @@ function parseScoreReportRows(content: string): ScoreReportProxyRow[] {
   return normalized;
 }
 
-export async function parseScoreReport(file: File): Promise<ScoreReportProxyRow[]> {
+export async function parseScoreReport(file: File, testType: TestType = "comlex2"): Promise<ScoreReportProxyRow[]> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     const error = new Error("OPENAI_API_KEY missing.");
@@ -77,6 +72,11 @@ export async function parseScoreReport(file: File): Promise<ScoreReportProxyRow[
   const base64 = bytes.toString("base64");
   const imageUrl = `data:${mimeType};base64,${base64}`;
   const model = process.env.OPENAI_MODEL ?? DEFAULT_MODEL;
+
+  const examContext =
+    testType === "usmle_step2"
+      ? "USMLE Step 2 categories: discipline, system, physician_task."
+      : "COMLEX Level 2 categories: discipline, competency_domain, clinical_presentation.";
 
   const response = await fetch(API_URL, {
     method: "POST",
@@ -92,7 +92,7 @@ export async function parseScoreReport(file: File): Promise<ScoreReportProxyRow[
         {
           role: "system",
           content:
-            "You read COMLEX-style score report graphs. Return strict JSON only. Estimate proxyWeakness from graph-bar position: lower performance=high weakness, average=medium, higher=low. proxyWeakness must be in [0,1].",
+            `You read score report graphs. ${examContext} Return strict JSON only. Estimate proxyWeakness from graph-bar position: lower performance=high weakness, average=medium, higher=low. proxyWeakness must be in [0,1].`,
         },
         {
           role: "user",
@@ -101,7 +101,7 @@ export async function parseScoreReport(file: File): Promise<ScoreReportProxyRow[
               type: "text",
               text: [
                 "Extract score report categories and weakness from graph bars.",
-                "Output JSON: {\"rows\":[{\"categoryType\":\"discipline|competency_domain|clinical_presentation\",\"name\":\"...\",\"proxyWeakness\":0.0}]}",
+                "Output JSON: {\"rows\":[{\"categoryType\":\"discipline|competency_domain|clinical_presentation|system|physician_task\",\"name\":\"...\",\"proxyWeakness\":0.0}]}",
                 "Only include categories you can see.",
               ].join(" "),
             },
@@ -125,21 +125,25 @@ export async function parseScoreReport(file: File): Promise<ScoreReportProxyRow[
     return [];
   }
 
-  return parseScoreReportRows(content);
+  return parseScoreReportRows(content, testType);
 }
 
 function proxyKey(categoryType: CategoryType, name: string) {
   return `${categoryType}::${name}`;
 }
 
-export function mergeScoreReportProxyRows(parsedRows: ParsedRow[], proxyRows: ScoreReportProxyRow[]): ParsedRow[] {
+export function mergeScoreReportProxyRows(
+  parsedRows: ParsedRow[],
+  proxyRows: ScoreReportProxyRow[],
+  testType: TestType = "comlex2",
+): ParsedRow[] {
   if (proxyRows.length === 0) {
     return parsedRows;
   }
 
   const normalizedProxyMap = new Map<string, ScoreReportProxyRow>();
   for (const proxyRow of proxyRows) {
-    const canonical = canonicalizeCategoryName(proxyRow.categoryType, proxyRow.name).canonicalName;
+    const canonical = canonicalizeCategoryName(proxyRow.categoryType, proxyRow.name, testType).canonicalName;
     normalizedProxyMap.set(proxyKey(proxyRow.categoryType, canonical), {
       ...proxyRow,
       name: canonical,
@@ -149,7 +153,7 @@ export function mergeScoreReportProxyRows(parsedRows: ParsedRow[], proxyRows: Sc
 
   const usedKeys = new Set<string>();
   const mergedRows = parsedRows.map((row) => {
-    const canonical = canonicalizeCategoryName(row.categoryType, row.name).canonicalName;
+    const canonical = canonicalizeCategoryName(row.categoryType, row.name, row.testType ?? testType).canonicalName;
     const key = proxyKey(row.categoryType, canonical);
     const proxy = normalizedProxyMap.get(key);
 
@@ -161,6 +165,7 @@ export function mergeScoreReportProxyRows(parsedRows: ParsedRow[], proxyRows: Sc
     const proxyWeakness = clamp01(proxy.proxyWeakness);
     return {
       ...row,
+      testType: row.testType ?? testType,
       proxyWeakness,
       proi: proxyWeakness * row.weight,
     };
@@ -171,9 +176,10 @@ export function mergeScoreReportProxyRows(parsedRows: ParsedRow[], proxyRows: Sc
       continue;
     }
 
-    const weight = getWeightForCategory(proxy.categoryType, proxy.name);
+    const weight = getWeightForCategory(proxy.categoryType, proxy.name, testType);
     const proxyWeakness = clamp01(proxy.proxyWeakness);
     mergedRows.push({
+      testType,
       categoryType: proxy.categoryType,
       name: proxy.name,
       weight,

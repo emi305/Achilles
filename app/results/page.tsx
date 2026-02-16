@@ -5,13 +5,16 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "reac
 import { useRouter } from "next/navigation";
 import { BrandHeader } from "../components/BrandHeader";
 import { Card } from "../components/Card";
+import { CATEGORY_LABEL_BY_TYPE, getCategoryOrderForTest } from "../lib/blueprint";
 import {
   clearUploadSession,
   getClientParsedRows,
+  getUploadSession,
   getServerParsedRows,
   subscribeUploadSession,
 } from "../lib/session";
-import type { CategoryType, ParsedRow, ZeusContext, ZeusContextRow } from "../lib/types";
+import { DEFAULT_TEST_TYPE } from "../lib/testSelection";
+import type { CategoryType, ParsedRow, TestType, ZeusContext, ZeusContextRow } from "../lib/types";
 import { getProiScore, getRoiScore, type RankingMode } from "../lib/priority";
 
 type DisplayRow = {
@@ -45,14 +48,6 @@ type AccumulatorRow = {
   qbankTotalSum: number;
   qbankAccuracySum: number;
   qbankAccuracyCount: number;
-};
-
-const CATEGORY_ORDER: CategoryType[] = ["discipline", "competency_domain", "clinical_presentation"];
-
-const CATEGORY_LABEL: Record<CategoryType, string> = {
-  discipline: "Discipline",
-  competency_domain: "Competency Domain",
-  clinical_presentation: "Clinical Presentation",
 };
 
 const modeLabels: Record<RankingMode, string> = {
@@ -301,12 +296,21 @@ export default function ResultsPage() {
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const parsedRows = useSyncExternalStore(subscribeUploadSession, getClientParsedRows, getServerParsedRows);
   const aggregated = useMemo(() => aggregateRows(parsedRows), [parsedRows]);
+  const selectedTest = useMemo<TestType>(() => {
+    const fromSession = getUploadSession()?.selectedTest;
+    if (fromSession) {
+      return fromSession;
+    }
+    const fromRows = parsedRows.find((row) => row.testType)?.testType;
+    return fromRows ?? DEFAULT_TEST_TYPE;
+  }, [parsedRows]);
+  const categoryOrder = useMemo(() => getCategoryOrderForTest(selectedTest), [selectedTest]);
 
   const sections = useMemo<TableSection[]>(() => {
     const generalRows = sortDisplayRows(aggregated, rankingMode);
-    const categorySections = CATEGORY_ORDER.map((categoryType) => ({
+    const categorySections = categoryOrder.map((categoryType) => ({
       key: categoryType,
-      title: `${CATEGORY_LABEL[categoryType]} Rank List`,
+      title: `${CATEGORY_LABEL_BY_TYPE[categoryType]} Rank List`,
       rows: sortDisplayRows(getSectionRows(generalRows, categoryType), rankingMode),
     }));
 
@@ -318,7 +322,7 @@ export default function ResultsPage() {
       },
       ...categorySections,
     ];
-  }, [aggregated, rankingMode]);
+  }, [aggregated, categoryOrder, rankingMode]);
 
   const topFive = useMemo(() => sortByFocusScore(aggregated).slice(0, 5), [aggregated]);
   const zeusRows = useMemo<ZeusContextRow[]>(
@@ -377,7 +381,7 @@ export default function ResultsPage() {
     const combinedOrdered = sortByFocusScore([...aggregated]);
 
     return {
-      exam: "comlex2",
+      exam: selectedTest,
       rows: zeusRows,
       topFive: topFive.map((row) => ({
         name: row.name,
@@ -392,7 +396,7 @@ export default function ResultsPage() {
       proiRanking: toRanked(proiOrdered, "proi"),
       combinedRanking: toRanked(combinedOrdered, "focusScore"),
     };
-  }, [aggregated, topFive, zeusRows]);
+  }, [aggregated, selectedTest, topFive, zeusRows]);
 
   useEffect(() => {
     if (!chatScrollRef.current) {
@@ -510,7 +514,7 @@ export default function ResultsPage() {
           {topFive.map((row) => (
             <li key={`insight-${row.categoryType}-${row.name}`} className="rounded-md border border-stone-200 bg-stone-50/40 p-3">
               <p className="font-semibold text-stone-900">
-                {row.name} ({CATEGORY_LABEL[row.categoryType]})
+                {row.name} ({CATEGORY_LABEL_BY_TYPE[row.categoryType]})
               </p>
               <p>
                 Weight: {formatPercent(row.weight)} | ROI: {row.hasRoi ? formatScore(row.roi) : "-"} | PROI:{" "}
@@ -527,7 +531,7 @@ export default function ResultsPage() {
           {topFive.map((row) => (
             <li key={`study-${row.categoryType}-${row.name}`} className="rounded-md border border-stone-200 bg-stone-50/40 p-3">
               <p className="font-semibold text-stone-900">
-                {row.name} ({CATEGORY_LABEL[row.categoryType]})
+                {row.name} ({CATEGORY_LABEL_BY_TYPE[row.categoryType]})
               </p>
               <ul className="list-disc pl-5">
                 {buildWhatToStudyBullets(row, {

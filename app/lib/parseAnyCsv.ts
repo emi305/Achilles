@@ -1,12 +1,14 @@
-import { getWeightForCategory } from "./comlexWeights";
+import { getWeightForCategory } from "./blueprint";
+import { canonicalizeCategoryName } from "./nameMatching";
 import { detectTemplate } from "./detectTemplate";
 import { splitCsvLine } from "./parseCsv";
 import type { TemplateId } from "./templates";
-import type { CategoryType, ParsedRow } from "./types";
+import type { CategoryType, ParsedRow, TestType } from "./types";
 
 type ParseAnyOptions = {
   template?: TemplateId;
   defaultCategoryType?: CategoryType;
+  testType?: TestType;
 };
 
 function parseInteger(value: string, label: string, lineNumber: number): number {
@@ -44,7 +46,14 @@ function parseLines(csvText: string): string[] {
   return lines;
 }
 
-function buildRow(categoryType: CategoryType, name: string, correct: number, total: number, lineNumber: number): ParsedRow {
+function buildRow(
+  categoryType: CategoryType,
+  name: string,
+  correct: number,
+  total: number,
+  lineNumber: number,
+  testType: TestType,
+): ParsedRow {
   if (!name.trim()) {
     throw new Error(`Missing name on line ${lineNumber}.`);
   }
@@ -57,13 +66,16 @@ function buildRow(categoryType: CategoryType, name: string, correct: number, tot
     throw new Error(`Invalid row on line ${lineNumber}. Correct cannot be greater than total.`);
   }
 
+  const matched = canonicalizeCategoryName(categoryType, name, testType);
+  const canonicalName = matched.canonicalName || name;
   const accuracy = correct / total;
-  const weight = getWeightForCategory(categoryType, name);
+  const weight = getWeightForCategory(categoryType, canonicalName, testType);
   const roi = (1 - accuracy) * weight;
 
   return {
+    testType,
     categoryType,
-    name,
+    name: canonicalName,
     correct,
     total,
     accuracy,
@@ -72,7 +84,7 @@ function buildRow(categoryType: CategoryType, name: string, correct: number, tot
   };
 }
 
-function parseAchillesSimple(lines: string[]): ParsedRow[] {
+function parseAchillesSimple(lines: string[], testType: TestType): ParsedRow[] {
   const parsedRows: ParsedRow[] = [];
 
   for (let index = 1; index < lines.length; index += 1) {
@@ -87,22 +99,24 @@ function parseAchillesSimple(lines: string[]): ParsedRow[] {
     if (
       categoryTypeRaw !== "competency_domain" &&
       categoryTypeRaw !== "clinical_presentation" &&
-      categoryTypeRaw !== "discipline"
+      categoryTypeRaw !== "discipline" &&
+      categoryTypeRaw !== "system" &&
+      categoryTypeRaw !== "physician_task"
     ) {
       throw new Error(
-        `Invalid categoryType on line ${lineNumber}. Use competency_domain, clinical_presentation, or discipline.`,
+        `Invalid categoryType on line ${lineNumber}.`,
       );
     }
 
     const correct = parseInteger(correctRaw, "correct", lineNumber);
     const total = parseInteger(totalRaw, "total", lineNumber);
-    parsedRows.push(buildRow(categoryTypeRaw, nameRaw, correct, total, lineNumber));
+    parsedRows.push(buildRow(categoryTypeRaw, nameRaw, correct, total, lineNumber, testType));
   }
 
   return parsedRows;
 }
 
-function parseCategoryPerformance(lines: string[], defaultCategoryType: CategoryType): ParsedRow[] {
+function parseCategoryPerformance(lines: string[], defaultCategoryType: CategoryType, testType: TestType): ParsedRow[] {
   const parsedRows: ParsedRow[] = [];
 
   for (let index = 1; index < lines.length; index += 1) {
@@ -116,13 +130,13 @@ function parseCategoryPerformance(lines: string[], defaultCategoryType: Category
     const [nameRaw, correctRaw, , totalRaw] = parts;
     const correct = parseInteger(correctRaw, "correct", lineNumber);
     const total = parseInteger(totalRaw, "total", lineNumber);
-    parsedRows.push(buildRow(defaultCategoryType, nameRaw, correct, total, lineNumber));
+    parsedRows.push(buildRow(defaultCategoryType, nameRaw, correct, total, lineNumber, testType));
   }
 
   return parsedRows;
 }
 
-function parsePercentCorrectTemplate(lines: string[], defaultCategoryType: CategoryType): ParsedRow[] {
+function parsePercentCorrectTemplate(lines: string[], defaultCategoryType: CategoryType, testType: TestType): ParsedRow[] {
   const parsedRows: ParsedRow[] = [];
 
   for (let index = 1; index < lines.length; index += 1) {
@@ -138,7 +152,7 @@ function parsePercentCorrectTemplate(lines: string[], defaultCategoryType: Categ
     const total = parseInteger(totalRaw, "total", lineNumber);
     const correct = Math.round(percentCorrect * total);
 
-    parsedRows.push(buildRow(defaultCategoryType, nameRaw, correct, total, lineNumber));
+    parsedRows.push(buildRow(defaultCategoryType, nameRaw, correct, total, lineNumber, testType));
   }
 
   return parsedRows;
@@ -154,6 +168,7 @@ export function parseAnyCsv(csvText: string, opts: ParseAnyOptions = {}): Parsed
   }
 
   const defaultCategoryType = opts.defaultCategoryType ?? "discipline";
+  const testType = opts.testType ?? "comlex2";
 
   let parsedRows: ParsedRow[];
 
@@ -163,21 +178,21 @@ export function parseAnyCsv(csvText: string, opts: ParseAnyOptions = {}): Parsed
     if (!isMatch || headerParts.length !== expected.length) {
       throw new Error("Invalid CSV header. Expected: categoryType,name,correct,total");
     }
-    parsedRows = parseAchillesSimple(lines);
+    parsedRows = parseAchillesSimple(lines, testType);
   } else if (templateId === "category_performance") {
     const expected = ["Category", "Correct", "Incorrect", "Total"];
     const isMatch = expected.every((value, index) => headerParts[index]?.toLowerCase() === value.toLowerCase());
     if (!isMatch || headerParts.length !== expected.length) {
       throw new Error("Invalid CSV header. Expected: Category,Correct,Incorrect,Total");
     }
-    parsedRows = parseCategoryPerformance(lines, defaultCategoryType);
+    parsedRows = parseCategoryPerformance(lines, defaultCategoryType, testType);
   } else {
     const expected = ["Category", "PercentCorrect", "Total"];
     const isMatch = expected.every((value, index) => headerParts[index]?.toLowerCase() === value.toLowerCase());
     if (!isMatch || headerParts.length !== expected.length) {
       throw new Error("Invalid CSV header. Expected: Category,PercentCorrect,Total");
     }
-    parsedRows = parsePercentCorrectTemplate(lines, defaultCategoryType);
+    parsedRows = parsePercentCorrectTemplate(lines, defaultCategoryType, testType);
   }
 
   if (parsedRows.length === 0) {

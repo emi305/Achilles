@@ -201,6 +201,8 @@ export default function SettingsPage() {
                 <option value="discipline">discipline</option>
                 <option value="competency_domain">competency_domain</option>
                 <option value="clinical_presentation">clinical_presentation</option>
+                <option value="system">system</option>
+                <option value="physician_task">physician_task</option>
               </select>
             </div>
           ) : null}

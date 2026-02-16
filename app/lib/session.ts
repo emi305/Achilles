@@ -1,6 +1,8 @@
-import type { ParsedRow } from "./types";
+import type { ParsedRow, TestType } from "./types";
+import { DEFAULT_TEST_TYPE, isTestType } from "./testSelection";
 
 export type UploadSessionData = {
+  selectedTest: TestType;
   pastedCsv: string;
   parsedRows: ParsedRow[];
   savedAt: string;
@@ -31,11 +33,15 @@ function parseRowsFromRaw(raw: string | null): ParsedRow[] {
   }
 
   try {
-    const parsed = JSON.parse(raw) as UploadSessionData;
+    const parsed = JSON.parse(raw) as Partial<UploadSessionData>;
     if (!Array.isArray(parsed?.parsedRows) || parsed.parsedRows.length === 0) {
       return EMPTY_ROWS;
     }
-    return parsed.parsedRows;
+    const selectedTest = isTestType(parsed.selectedTest) ? parsed.selectedTest : DEFAULT_TEST_TYPE;
+    return parsed.parsedRows.map((row) => ({
+      ...row,
+      testType: row.testType ?? selectedTest,
+    }));
   } catch {
     if (canUseSessionStorage()) {
       window.sessionStorage.removeItem(STORAGE_KEY);
@@ -122,7 +128,22 @@ export function getUploadSession(): UploadSessionData | null {
   }
 
   try {
-    return JSON.parse(raw) as UploadSessionData;
+    const parsed = JSON.parse(raw) as Partial<UploadSessionData>;
+    const selectedTest = isTestType(parsed.selectedTest) ? parsed.selectedTest : DEFAULT_TEST_TYPE;
+    const parsedRows = Array.isArray(parsed.parsedRows)
+      ? parsed.parsedRows.map((row) => ({ ...row, testType: row.testType ?? selectedTest }))
+      : [];
+
+    if (parsedRows.length === 0) {
+      return null;
+    }
+
+    return {
+      selectedTest,
+      pastedCsv: typeof parsed.pastedCsv === "string" ? parsed.pastedCsv : "",
+      parsedRows,
+      savedAt: typeof parsed.savedAt === "string" ? parsed.savedAt : new Date().toISOString(),
+    };
   } catch {
     window.sessionStorage.removeItem(STORAGE_KEY);
     return null;

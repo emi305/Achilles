@@ -1,10 +1,17 @@
-import { getWeightForCategory } from "./comlexWeights";
-import type { CategoryType, ParsedRow } from "./types";
+import { getWeightForCategory } from "./blueprint";
+import { canonicalizeCategoryName } from "./nameMatching";
+import type { CategoryType, ParsedRow, TestType } from "./types";
 
 const EXPECTED_HEADER = ["categoryType", "name", "correct", "total"];
 
 function isCategoryType(value: string): value is CategoryType {
-  return value === "competency_domain" || value === "clinical_presentation" || value === "discipline";
+  return (
+    value === "competency_domain" ||
+    value === "clinical_presentation" ||
+    value === "discipline" ||
+    value === "system" ||
+    value === "physician_task"
+  );
 }
 
 function parseInteger(value: string, label: string, lineNumber: number): number {
@@ -53,7 +60,7 @@ export function splitCsvLine(line: string): string[] {
   return fields;
 }
 
-export function parseCsv(csvText: string): ParsedRow[] {
+export function parseCsv(csvText: string, testType: TestType = "comlex2"): ParsedRow[] {
   const lines = csvText
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -106,12 +113,15 @@ export function parseCsv(csvText: string): ParsedRow[] {
     }
 
     const accuracy = correct / total;
-    const weight = getWeightForCategory(categoryTypeRaw, nameRaw);
+    const matched = canonicalizeCategoryName(categoryTypeRaw, nameRaw, testType);
+    const canonicalName = matched.canonicalName || nameRaw;
+    const weight = getWeightForCategory(categoryTypeRaw, canonicalName, testType);
     const roi = (1 - accuracy) * weight;
 
     parsedRows.push({
+      testType,
       categoryType: categoryTypeRaw,
-      name: nameRaw,
+      name: canonicalName,
       correct,
       total,
       accuracy,
