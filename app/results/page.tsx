@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { BrandHeader } from "../components/BrandHeader";
 import { Card } from "../components/Card";
@@ -294,15 +294,11 @@ export default function ResultsPage() {
   const router = useRouter();
   const [rankingMode, setRankingMode] = useState<RankingMode>("roi");
   const [showRestOfData, setShowRestOfData] = useState(false);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    {
-      role: "assistant",
-      content: "I’m Zeus. Ask what to study next based on your current data.",
-    },
-  ]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [chatError, setChatError] = useState("");
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const parsedRows = useSyncExternalStore(subscribeUploadSession, getClientParsedRows, getServerParsedRows);
   const aggregated = useMemo(() => aggregateRows(parsedRows), [parsedRows]);
 
@@ -398,12 +394,20 @@ export default function ResultsPage() {
     };
   }, [aggregated, topFive, zeusRows]);
 
+  useEffect(() => {
+    if (!chatScrollRef.current) {
+      return;
+    }
+    chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+  }, [chatMessages, isChatLoading]);
+
   const onSendChat = async () => {
     const message = chatInput.trim();
     if (!message || isChatLoading) {
       return;
     }
 
+    const isFirstUserMessage = chatMessages.every((entry) => entry.role !== "user");
     setChatError("");
     setChatInput("");
     setChatMessages((prev) => [...prev, { role: "user", content: message }]);
@@ -417,6 +421,7 @@ export default function ResultsPage() {
         },
         body: JSON.stringify({
           message,
+          firstUserMessage: isFirstUserMessage,
           context: zeusContext,
         }),
       });
@@ -433,7 +438,7 @@ export default function ResultsPage() {
 
       setChatMessages((prev) => [...prev, { role: "assistant", content: reply }]);
     } catch {
-      setChatError("Zeus couldn’t respond. Try again.");
+      setChatError("Zeus couldn't respond. Try again.");
     } finally {
       setIsChatLoading(false);
     }
@@ -548,23 +553,26 @@ export default function ResultsPage() {
         </button>
       </div>
 
-      <Card title="Zeus" className="mx-auto w-full max-w-3xl">
+      <Card title="ZEUS" className="mx-auto w-full max-w-3xl">
         <p className="text-sm text-stone-600">Ask Zeus what to do next based on your data.</p>
-        <div className="max-h-72 space-y-3 overflow-y-auto rounded-md border border-stone-200 bg-stone-50/40 p-3">
+        <div ref={chatScrollRef} className="max-h-72 space-y-3 overflow-y-auto rounded-md border border-stone-200 bg-stone-50/40 p-3">
           {chatMessages.map((message, index) => (
-            <div
-              key={`zeus-msg-${index}`}
-              className={`rounded-md px-3 py-2 text-sm ${
-                message.role === "user" ? "bg-stone-200 text-stone-900" : "bg-white text-stone-800"
-              }`}
-            >
-              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-500">
-                {message.role === "user" ? "You" : "Zeus"}
-              </p>
-              <p className="whitespace-pre-wrap">{message.content}</p>
+            <div key={`zeus-msg-${index}`} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div
+                className={`max-w-[70%] rounded-md border px-3 py-2 text-sm ${
+                  message.role === "user"
+                    ? "border-stone-300 bg-stone-200 text-stone-900"
+                    : "border-stone-200 bg-white text-stone-800"
+                }`}
+              >
+                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-500">
+                  {message.role === "user" ? "YOU" : "ZEUS"}
+                </p>
+                <p className="whitespace-pre-wrap break-words leading-relaxed">{message.content}</p>
+              </div>
             </div>
           ))}
-          {isChatLoading ? <p className="text-sm text-stone-600">Zeus is thinking…</p> : null}
+          {isChatLoading ? <p className="text-sm text-stone-600">Zeus is thinking...</p> : null}
         </div>
         <div className="flex gap-2">
           <input
@@ -613,3 +621,4 @@ export default function ResultsPage() {
     </section>
   );
 }
+
