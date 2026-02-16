@@ -7,7 +7,14 @@ type BrandHeaderProps = {
 export function BrandHeader({ subtitle }: BrandHeaderProps) {
   return (
     <header className="mx-auto flex max-w-3xl flex-col items-center text-center">
-      <Image src="/greek/parthenon.svg" alt="Parthenon icon" width={160} height={96} priority />
+      <Image
+        src="/greek/parthenon.svg"
+        alt="Parthenon icon"
+        width={560}
+        height={220}
+        priority
+        className="h-auto w-full max-w-[34rem]"
+      />
       <h1 className="brand-title mt-3 text-4xl tracking-[0.12em] text-stone-800 sm:text-5xl">ACHILLES INSIGHT</h1>
       <p className="mt-2 text-sm font-medium uppercase tracking-[0.08em] text-stone-600 sm:text-base">
         Find your Achilles Heel

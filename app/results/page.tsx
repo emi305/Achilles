@@ -218,28 +218,6 @@ type RankContext = {
   avgRank?: number;
 };
 
-function buildAchillesInsightBullets(row: DisplayRow, ranks: RankContext): string[] {
-  const topPhrases = ["top priority", "high-importance target", "strong focus area", "key target"];
-  const phrase = topPhrases[(ranks.roiRank + (ranks.avgRank ?? 0)) % topPhrases.length];
-  const bullets = [
-    `This category makes up ${formatPercent(row.weight)} of the test, so it remains a ${phrase}.`,
-    row.hasRoi
-      ? `ROI rank is #${ranks.roiRank} at ${formatScore(row.roi)}, showing strong weighted upside from QBank gains.`
-      : "QBank ROI is limited here, so this recommendation relies more on non-ROI signals.",
-    typeof ranks.avgRank === "number"
-      ? `Avg % Correct rank is #${ranks.avgRank} (lower is worse), currently ${typeof row.avgCorrect === "number" ? formatPercent(row.avgCorrect) : "Not available"}.`
-      : `Avg % Correct is ${typeof row.avgCorrect === "number" ? formatPercent(row.avgCorrect) : "Not available"}.`,
-  ];
-
-  if (row.hasProi && typeof ranks.proiRank === "number") {
-    bullets.push(`Score report also supports this target (PROI rank #${ranks.proiRank}, value ${formatScore(row.proi)}).`);
-  } else {
-    bullets.push("Score report data not uploaded yet, so this recommendation is driven primarily by QBank performance.");
-  }
-
-  return bullets;
-}
-
 function buildWhatToStudyBullets(row: DisplayRow, ranks: RankContext): string[] {
   const openingOptions = [
     `This category makes up ${formatPercent(row.weight)} of the test.`,
@@ -255,10 +233,10 @@ function buildWhatToStudyBullets(row: DisplayRow, ranks: RankContext): string[] 
       : "QBank ROI is limited for this category, so treat this as a secondary QBank target.",
     typeof ranks.avgRank === "number"
       ? `Avg % Correct rank is #${ranks.avgRank} at ${typeof row.avgCorrect === "number" ? formatPercent(row.avgCorrect) : "Not available"}, which sets urgency.`
-      : `Avg % Correct is ${typeof row.avgCorrect === "number" ? formatPercent(row.avgCorrect) : "Not available"}.`,
+      : "No QBank Avg % Correct available (upload QBank data).",
     row.hasProi
       ? `Score report agrees (PROI rank #${ranks.proiRank}, value ${formatScore(row.proi)}).`
-      : "Score report data not uploaded yet, so this is based on QBank performance.",
+      : "No score report PROI available for this category (upload score report).",
   ];
 
   return bullets;
@@ -295,7 +273,7 @@ function RankTable({ title, rows, mode }: { title: string; rows: DisplayRow[]; m
                   </>
                 ) : (
                   <td className="px-3 py-2 text-stone-700">
-                    {typeof row.avgCorrect === "number" ? formatPercent(row.avgCorrect) : "Not available"}
+                    {typeof row.avgCorrect === "number" ? formatPercent(row.avgCorrect) : "— (QBank data required)"}
                   </td>
                 )}
               </tr>
@@ -378,7 +356,7 @@ export default function ResultsPage() {
 
   return (
     <section className="space-y-6 pt-6 sm:pt-10">
-      <BrandHeader subtitle="Review your Achilles Heels." />
+      <BrandHeader />
 
       <Card>
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -392,8 +370,8 @@ export default function ResultsPage() {
                 aria-pressed={rankingMode === mode}
                 className={`rounded-md border px-3 py-1.5 text-sm font-medium transition ${
                   rankingMode === mode
-                    ? "border-stone-800 bg-stone-800 text-amber-50"
-                    : "border-stone-300 bg-white text-stone-700 hover:bg-stone-50"
+                    ? "cursor-pointer border-stone-800 bg-stone-800 text-amber-50"
+                    : "cursor-pointer border-stone-300 bg-white text-stone-700 hover:bg-stone-50"
                 }`}
               >
                 {modeLabels[mode]}
@@ -430,15 +408,6 @@ export default function ResultsPage() {
                 {row.hasProi ? formatScore(row.proi) : PROI_PLACEHOLDER} | Avg % Correct:{" "}
                 {typeof row.avgCorrect === "number" ? formatPercent(row.avgCorrect) : "Not available"}
               </p>
-              <ul className="list-disc pl-5">
-                {buildAchillesInsightBullets(row, {
-                  roiRank: roiRankMap.get(`${row.categoryType}::${row.name}`) ?? 0,
-                  proiRank: proiRankMap.get(`${row.categoryType}::${row.name}`),
-                  avgRank: avgRankMap.get(`${row.categoryType}::${row.name}`),
-                }).map((bullet) => (
-                  <li key={`${row.name}-${bullet}`}>{bullet}</li>
-                ))}
-              </ul>
             </li>
           ))}
         </ul>

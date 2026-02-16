@@ -46,12 +46,6 @@ type ImportFileResponse = {
   results: ImportFileResult[];
 };
 
-type FileExtractionStatus = {
-  filename: string;
-  status: "queued" | "extracting" | "done" | "failed";
-  message?: string;
-};
-
 type ScoreReportParseResponse = {
   proxyRows: ScoreReportProxyRow[];
   warnings: string[];
@@ -67,8 +61,7 @@ export default function UploadPage() {
   const [scoreReportWarnings, setScoreReportWarnings] = useState<string[]>([]);
   const [showAiSetupChecklist, setShowAiSetupChecklist] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [progressLabel, setProgressLabel] = useState("");
-  const [fileStatuses, setFileStatuses] = useState<FileExtractionStatus[]>([]);
+  const [analyzingDots, setAnalyzingDots] = useState(1);
   const [profiles, setProfiles] = useState<ProfilesMap>(() => getInitialSettings().profiles);
   const [activeProfile, setActiveProfile] = useState(() => getInitialSettings().activeProfile);
 
@@ -81,6 +74,19 @@ export default function UploadPage() {
   useEffect(() => {
     saveProfilesToLocalStorage(profiles);
   }, [profiles]);
+
+  useEffect(() => {
+    if (!isAnalyzing) {
+      setAnalyzingDots(1);
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setAnalyzingDots((prev) => ((prev % 3) + 1));
+    }, 350);
+
+    return () => window.clearInterval(intervalId);
+  }, [isAnalyzing]);
 
   const updateActiveProfileText = (nextText: string) => {
     setProfiles((prev) => ({
@@ -182,23 +188,12 @@ export default function UploadPage() {
 
   const importFilesToText = async (): Promise<string> => {
     if (selectedFiles.length === 0) {
-      setFileStatuses([]);
       return "";
     }
-
-    const initialStatuses = selectedFiles.map((file) => ({
-      filename: file.name,
-      status: "queued" as const,
-    }));
-    setFileStatuses(initialStatuses);
 
     const formData = new FormData();
     for (let index = 0; index < selectedFiles.length; index += 1) {
       const file = selectedFiles[index];
-      setProgressLabel(`Extracting ${index + 1}/${selectedFiles.length}: ${file.name}`);
-      setFileStatuses((prev) =>
-        prev.map((item, itemIndex) => (itemIndex === index ? { ...item, status: "extracting" } : item)),
-      );
       formData.append("files", file);
       // Yield to UI so progress text updates while preparing upload.
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -221,17 +216,6 @@ export default function UploadPage() {
     }
 
     const payload = (await response.json()) as ImportFileResponse;
-    const total = payload.results.length;
-    const doneCount = payload.results.filter((item) => item.ok).length;
-    setProgressLabel(`Extracting ${doneCount}/${total} complete`);
-    setFileStatuses(
-      payload.results.map((item) => ({
-        filename: item.filename,
-        status: item.ok ? "done" : "failed",
-        message: item.message,
-      })),
-    );
-
     const warnings = payload.results
       .filter((item) => !item.ok)
       .map((item) => `${item.filename}: ${item.message ?? "Couldnâ€™t read this file."}`);
@@ -285,7 +269,6 @@ export default function UploadPage() {
     }
 
     setIsAnalyzing(true);
-    setProgressLabel("");
     setErrorMessage("");
     setShowAiSetupChecklist(false);
     setFileWarnings([]);
@@ -338,10 +321,10 @@ export default function UploadPage() {
       <BrandHeader subtitle="Upload standardized test data." />
 
       <p className="mx-auto max-w-2xl text-center text-sm text-stone-700 sm:text-base">
-        Upload screenshots or PDFs first, then optionally add pasted text.
+        Upload screenshots and/or PDFs and/or text.
       </p>
 
-      <Card title="Input">
+      <Card title="INPUT DATA">
         <div className="space-y-2">
           <label className="block text-sm font-medium text-stone-900" htmlFor="profile-select">
             Profile
@@ -364,7 +347,7 @@ export default function UploadPage() {
         </div>
 
         <div className="space-y-3 rounded-md border border-stone-300 bg-stone-50/50 p-4">
-          <h3 className="text-base font-semibold text-stone-900">Upload Test Data</h3>
+          <h3 className="text-base font-semibold text-stone-900">Upload Question Bank Data</h3>
           <input
             id="stats-file-upload"
             type="file"
@@ -386,7 +369,6 @@ export default function UploadPage() {
                   type="button"
                   onClick={() => {
                     setSelectedFiles([]);
-                    setFileStatuses([]);
                   }}
                   className="text-xs font-medium text-stone-700 underline"
                 >
@@ -414,7 +396,7 @@ export default function UploadPage() {
         </div>
 
         <div className="space-y-3 rounded-md border border-stone-300 bg-stone-50/50 p-4">
-          <h3 className="text-base font-semibold text-stone-900">Upload Score Report (optional)</h3>
+          <h3 className="text-base font-semibold text-stone-900">Upload Score Report</h3>
           <input
             id="score-report-upload"
             type="file"
@@ -426,8 +408,7 @@ export default function UploadPage() {
             }}
             className="block w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900"
           />
-          <p className="text-xs text-stone-600">Upload Score Report (PDF or screenshot) to enable PROI.</p>
-          <p className="text-xs text-stone-500">v1 supports screenshot parsing. PDFs may require screenshot upload.</p>
+          <p className="text-xs text-stone-600">Upload screenshots or PDFs (you can select multiple).</p>
 
           {scoreReportFiles.length > 0 ? (
             <ul className="space-y-1 rounded-md border border-stone-200 bg-white p-3 text-sm text-stone-700">
@@ -465,24 +446,7 @@ export default function UploadPage() {
           />
         </div>
 
-        {progressLabel ? <p className="text-sm text-stone-700">{progressLabel}</p> : null}
-
-        {fileStatuses.length > 0 ? (
-          <div className="space-y-1 rounded-md border border-stone-200 bg-stone-50/60 p-3 text-xs text-stone-700">
-            {fileStatuses.map((item) => (
-              <p key={`status-${item.filename}`}>
-                {item.filename}:{" "}
-                {item.status === "extracting"
-                  ? "extracting..."
-                  : item.status === "done"
-                    ? "done"
-                    : item.status === "failed"
-                      ? "failed"
-                      : "queued"}
-              </p>
-            ))}
-          </div>
-        ) : null}
+        {isAnalyzing ? <p className="text-sm text-stone-700">{`Analyzing data${".".repeat(analyzingDots)}`}</p> : null}
 
         <div className="flex flex-wrap items-center gap-3">
           <button
