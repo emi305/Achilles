@@ -11,7 +11,7 @@ import {
   getServerParsedRows,
   subscribeUploadSession,
 } from "../lib/session";
-import type { CategoryType, ParsedRow } from "../lib/types";
+import type { CategoryType, ParsedRow, ZeusContext, ZeusContextRow } from "../lib/types";
 import { getProiScore, getRoiScore, type RankingMode } from "../lib/priority";
 
 type DisplayRow = {
@@ -61,6 +61,11 @@ const modeLabels: Record<RankingMode, string> = {
 };
 
 const PROI_PLACEHOLDER = "Not available (upload score report)";
+
+type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
 
 function clamp01(value: number) {
   return Math.max(0, Math.min(1, value));
@@ -288,6 +293,16 @@ function RankTable({ title, rows, mode }: { title: string; rows: DisplayRow[]; m
 export default function ResultsPage() {
   const router = useRouter();
   const [rankingMode, setRankingMode] = useState<RankingMode>("roi");
+  const [showRestOfData, setShowRestOfData] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
+    {
+      role: "assistant",
+      content: "I’m Zeus. Ask what to study next based on your current data.",
+    },
+  ]);
+  const [chatInput, setChatInput] = useState("");
+  const [isChatLoading, setIsChatLoading] = useState(false);
+  const [chatError, setChatError] = useState("");
   const parsedRows = useSyncExternalStore(subscribeUploadSession, getClientParsedRows, getServerParsedRows);
   const aggregated = useMemo(() => aggregateRows(parsedRows), [parsedRows]);
 
@@ -310,6 +325,18 @@ export default function ResultsPage() {
   }, [aggregated, rankingMode]);
 
   const topFive = useMemo(() => sortByFocusScore(aggregated).slice(0, 5), [aggregated]);
+  const zeusRows = useMemo<ZeusContextRow[]>(
+    () =>
+      aggregated.map((row) => ({
+        name: row.name,
+        categoryType: row.categoryType,
+        weight: row.weight,
+        roi: row.roi,
+        proi: row.hasProi ? row.proi : 0,
+        avgCorrect: typeof row.avgCorrect === "number" ? row.avgCorrect : null,
+      })),
+    [aggregated],
+  );
   const roiRankMap = useMemo(() => {
     const map = new Map<string, number>();
     sortDisplayRows([...aggregated], "roi").forEach((row, index) => {
@@ -334,6 +361,83 @@ export default function ResultsPage() {
       });
     return map;
   }, [aggregated]);
+  const zeusContext = useMemo<ZeusContext>(() => {
+    const toRanked = (rows: DisplayRow[], scoreKey: "roi" | "proi" | "focusScore" | "avgCorrect") =>
+      rows.map((row, index) => ({
+        rank: index + 1,
+        name: row.name,
+        categoryType: row.categoryType,
+        score:
+          scoreKey === "avgCorrect"
+            ? typeof row.avgCorrect === "number"
+              ? row.avgCorrect
+              : Number.POSITIVE_INFINITY
+            : row[scoreKey],
+      }));
+
+    const roiOrdered = sortDisplayRows([...aggregated], "roi");
+    const avgOrdered = sortDisplayRows([...aggregated], "avg");
+    const proiOrdered = [...aggregated].filter((row) => row.hasProi).sort((a, b) => b.proi - a.proi);
+    const combinedOrdered = sortByFocusScore([...aggregated]);
+
+    return {
+      exam: "comlex2",
+      rows: zeusRows,
+      topFive: topFive.map((row) => ({
+        name: row.name,
+        categoryType: row.categoryType,
+        weight: row.weight,
+        roi: row.roi,
+        proi: row.hasProi ? row.proi : 0,
+        avgCorrect: typeof row.avgCorrect === "number" ? row.avgCorrect : null,
+      })),
+      roiRanking: toRanked(roiOrdered, "roi"),
+      avgCorrectRanking: toRanked(avgOrdered, "avgCorrect"),
+      proiRanking: toRanked(proiOrdered, "proi"),
+      combinedRanking: toRanked(combinedOrdered, "focusScore"),
+    };
+  }, [aggregated, topFive, zeusRows]);
+
+  const onSendChat = async () => {
+    const message = chatInput.trim();
+    if (!message || isChatLoading) {
+      return;
+    }
+
+    setChatError("");
+    setChatInput("");
+    setChatMessages((prev) => [...prev, { role: "user", content: message }]);
+    setIsChatLoading(true);
+
+    try {
+      const response = await fetch("/api/zeus", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          message,
+          context: zeusContext,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("ZEUS_REQUEST_FAILED");
+      }
+
+      const data = (await response.json()) as { reply?: string };
+      const reply = (data.reply ?? "").trim();
+      if (!reply) {
+        throw new Error("ZEUS_EMPTY_REPLY");
+      }
+
+      setChatMessages((prev) => [...prev, { role: "assistant", content: reply }]);
+    } catch {
+      setChatError("Zeus couldn’t respond. Try again.");
+    } finally {
+      setIsChatLoading(false);
+    }
+  };
 
   if (parsedRows.length === 0) {
     return (
@@ -434,9 +538,65 @@ export default function ResultsPage() {
         </ul>
       </Card>
 
-      {sections.map((section) => (
-        <RankTable key={section.key} title={section.title} rows={section.rows} mode={rankingMode} />
-      ))}
+      <div className="flex justify-center">
+        <button
+          type="button"
+          onClick={() => setShowRestOfData((prev) => !prev)}
+          className="cursor-pointer rounded-md border border-stone-300 bg-white px-4 py-2 text-sm font-semibold text-stone-800 transition hover:bg-stone-50"
+        >
+          {showRestOfData ? "Hide rest of data" : "See rest of data"}
+        </button>
+      </div>
+
+      <Card title="Zeus" className="mx-auto w-full max-w-3xl">
+        <p className="text-sm text-stone-600">Ask Zeus what to do next based on your data.</p>
+        <div className="max-h-72 space-y-3 overflow-y-auto rounded-md border border-stone-200 bg-stone-50/40 p-3">
+          {chatMessages.map((message, index) => (
+            <div
+              key={`zeus-msg-${index}`}
+              className={`rounded-md px-3 py-2 text-sm ${
+                message.role === "user" ? "bg-stone-200 text-stone-900" : "bg-white text-stone-800"
+              }`}
+            >
+              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-500">
+                {message.role === "user" ? "You" : "Zeus"}
+              </p>
+              <p className="whitespace-pre-wrap">{message.content}</p>
+            </div>
+          ))}
+          {isChatLoading ? <p className="text-sm text-stone-600">Zeus is thinking…</p> : null}
+        </div>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={chatInput}
+            onChange={(event) => setChatInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                void onSendChat();
+              }
+            }}
+            placeholder="Ask Zeus what to do next..."
+            className="flex-1 rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900"
+          />
+          <button
+            type="button"
+            disabled={isChatLoading || !chatInput.trim()}
+            onClick={() => void onSendChat()}
+            className="cursor-pointer rounded-md bg-stone-800 px-4 py-2 text-sm font-semibold text-amber-50 transition hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Send
+          </button>
+        </div>
+        {chatError ? <p className="text-sm text-red-700">{chatError}</p> : null}
+      </Card>
+
+      {showRestOfData
+        ? sections.map((section) => (
+            <RankTable key={section.key} title={section.title} rows={section.rows} mode={rankingMode} />
+          ))
+        : null}
 
       <div className="pt-2">
         <button

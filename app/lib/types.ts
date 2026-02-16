@@ -44,3 +44,29 @@ export type ReviewSessionData = {
   parsedRows: ParsedRow[];
   savedAt: string;
 };
+
+export type ZeusContextRow = {
+  name: string;
+  categoryType: CategoryType;
+  weight: number;
+  roi: number;
+  proi: number;
+  avgCorrect: number | null;
+};
+
+export type ZeusRankedItem = {
+  rank: number;
+  name: string;
+  categoryType: CategoryType;
+  score: number;
+};
+
+export type ZeusContext = {
+  exam: string;
+  rows: ZeusContextRow[];
+  topFive: ZeusContextRow[];
+  roiRanking: ZeusRankedItem[];
+  avgCorrectRanking: ZeusRankedItem[];
+  proiRanking: ZeusRankedItem[];
+  combinedRanking: ZeusRankedItem[];
+};
