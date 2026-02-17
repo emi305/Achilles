@@ -2,6 +2,7 @@ import { canonicalizeCategoryName, recoverCategoryTypeForComlex2 } from "./nameM
 import { getWeightForCategory } from "./blueprint";
 import { COMLEX_COMPETENCY_DOMAIN_CANONICAL } from "./comlexCanonicalNames";
 import { COMPETENCY_DOMAIN_WEIGHTS } from "./comlexWeights";
+import { computeAvgPercentCorrect } from "./avgCorrect";
 import { normalizeExtractRows } from "./normalizeExtract";
 import { normalizeRowForMapping } from "./normalizeRowForMapping";
 import {
@@ -507,6 +508,31 @@ if (process.argv.includes("--run")) {
     process.exitCode = 1;
   }
 
+  const nonZeroRoiFixtures = normalizeExtractRows(
+    [
+      { categoryType: "uworld_system", name: "Pregnancy, Childbirth & Puerperium", correct: 51, total: 96, confidence: 1 },
+      { categoryType: "uworld_system", name: "Social Sciences (Ethics/Legal/Professional)", correct: 15, total: 19, confidence: 1 },
+      { categoryType: "uworld_system", name: "Allergy & Immunology", correct: 10, total: 20, confidence: 1 },
+      { categoryType: "uworld_system", name: "Musculoskeletal Sys/Skin & Subcutaneous Tissue", correct: 20, total: 40, confidence: 1 },
+    ],
+    "usmle_step2",
+    "uworld",
+    "uworld_qbank",
+  ).parsedRows;
+  const expectedNonZeroNames = new Set([
+    "Pregnancy/Childbirth & Puerperium",
+    "Social Sciences (Ethics/Legal/Professionalism/Patient Safety)",
+    "Immune",
+    "MSK / Skin & Subcutaneous",
+  ]);
+  for (const name of expectedNonZeroNames) {
+    const row = nonZeroRoiFixtures.find((item) => item.name === name);
+    if (!row || row.weight == null || (row.roi ?? 0) <= 0) {
+      console.error(`[roi] expected non-zero ROI for ${name} with non-zero attempts.`);
+      process.exitCode = 1;
+    }
+  }
+
   const usmleScoreReportCategoryChecks: Array<{ type: CategoryType; label: string }> = [
     { type: "physician_task", label: "Patient Care: Management" },
     { type: "system", label: "Cardiovascular System" },
@@ -525,6 +551,25 @@ if (process.argv.includes("--run")) {
       console.error(`- ${failed.type}: ${failed.label}`);
     }
     process.exitCode = 1;
+  }
+
+  const avgChecks: Array<{ label: string; correct: number; incorrect: number; expected: number | null }> = [
+    { label: "Medicine (IM)", correct: 24, incorrect: 36, expected: 40.0 },
+    { label: "Psychiatry", correct: 70, incorrect: 74, expected: 48.6 },
+    { label: "Social Sciences", correct: 15, incorrect: 4, expected: 78.9 },
+    { label: "Behavioral Health", correct: 71, incorrect: 74, expected: 49.0 },
+    { label: "Pregnancy", correct: 51, incorrect: 45, expected: 53.1 },
+    { label: "No attempts", correct: 0, incorrect: 0, expected: null },
+  ];
+  for (const check of avgChecks) {
+    const actual = computeAvgPercentCorrect(check.correct, check.incorrect);
+    const rounded = actual == null ? null : Math.round(actual * 10) / 10;
+    if (rounded !== check.expected) {
+      console.error(
+        `[avg-correct] ${check.label} failed: expected ${String(check.expected)} got ${String(rounded)}`,
+      );
+      process.exitCode = 1;
+    }
   }
 
   if (Math.abs(USMLE_STEP2_SUBJECT_WEIGHT_SUM - 1) > 1e-6) {

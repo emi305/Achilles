@@ -63,27 +63,52 @@ function findBestLabelMatch(normalizedLine: string): MatchedLabel | null {
   return best;
 }
 
-function parseCorrectIncorrect(line: string): { correct: number; incorrect: number } | null {
-  const numeric = (line.match(/\d+/g) ?? []).map(Number);
+function toInt(value: string | undefined): number {
+  if (!value) {
+    return 0;
+  }
+  const parsed = Number.parseInt(value.replace(/,/g, ""), 10);
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+}
+
+function parseCounts(
+  line: string,
+): {
+  correct: number;
+  incorrect: number;
+  omittedCount?: number;
+  usageUsed?: number;
+  usageTotal?: number;
+  uiCorrectPct?: number;
+} | null {
+  const usageMatch = line.match(/usage\s+(\d[\d,]*)\s*\/\s*(\d[\d,]*)/i);
+  const correctMatch = line.match(/correct\s*q?\s+(\d[\d,]*)(?:\s*\(([\d.]+)%\))?/i);
+  const incorrectMatch = line.match(/incorrect\s*q?\s+(\d[\d,]*)(?:\s*\(([\d.]+)%\))?/i);
+  const omittedMatch = line.match(/omitted\s*q?\s+(\d[\d,]*)(?:\s*\(([\d.]+)%\))?/i);
+
+  if (correctMatch && incorrectMatch) {
+    return {
+      usageUsed: usageMatch ? toInt(usageMatch[1]) : undefined,
+      usageTotal: usageMatch ? toInt(usageMatch[2]) : undefined,
+      correct: toInt(correctMatch[1]),
+      incorrect: toInt(incorrectMatch[1]),
+      omittedCount: omittedMatch ? toInt(omittedMatch[1]) : undefined,
+      uiCorrectPct:
+        typeof correctMatch[2] === "string" && correctMatch[2].length > 0
+          ? Number.parseFloat(correctMatch[2])
+          : undefined,
+    };
+  }
+
+  // Fallback for partially structured OCR lines.
+  const numeric = (line.match(/\d[\d,]*/g) ?? []).map((value) => Number.parseInt(value.replace(/,/g, ""), 10));
   if (numeric.length < 2) {
     return null;
   }
-
-  if (numeric.length >= 3) {
-    const correct = numeric[1] ?? 0;
-    const incorrect = numeric[2] ?? 0;
-    if (correct >= 0 && incorrect >= 0) {
-      return { correct, incorrect };
-    }
-  }
-
-  const correct = numeric[0] ?? 0;
-  const incorrect = numeric[1] ?? 0;
-  if (correct >= 0 && incorrect >= 0) {
-    return { correct, incorrect };
-  }
-
-  return null;
+  return {
+    correct: Math.max(0, numeric[0] ?? 0),
+    incorrect: Math.max(0, numeric[1] ?? 0),
+  };
 }
 
 export function parseUworldQbankText(rawText: string): ExtractedRow[] {
@@ -109,20 +134,42 @@ export function parseUworldQbankText(rawText: string): ExtractedRow[] {
         continue;
       }
 
-      const parsed = parseCorrectIncorrect(candidateLine);
+      const parsed = parseCounts(candidateLine);
       if (!parsed) {
         continue;
       }
 
       const total = parsed.correct + parsed.incorrect;
       if (total <= 0) {
+        if (process.env.NODE_ENV !== "production" && (parsed.usageUsed ?? 0) > 0) {
+          console.warn(
+            `[uworld-parse] counts missing for "${labelMatch.canonicalName}" (usage=${parsed.usageUsed}/${parsed.usageTotal ?? 0})`,
+          );
+        }
         continue;
+      }
+
+      if (
+        process.env.NODE_ENV !== "production" &&
+        typeof parsed.uiCorrectPct === "number" &&
+        Number.isFinite(parsed.uiCorrectPct)
+      ) {
+        const computedPct = (parsed.correct / total) * 100;
+        if (Math.abs(computedPct - parsed.uiCorrectPct) > 5) {
+          console.warn(
+            `[uworld-parse] percent mismatch for "${labelMatch.canonicalName}": ui=${parsed.uiCorrectPct.toFixed(1)} computed=${computedPct.toFixed(1)}`,
+          );
+        }
       }
 
       const row: ExtractedRow = {
         categoryType: labelMatch.categoryType,
         name: labelMatch.canonicalName,
         correct: parsed.correct,
+        incorrectCount: parsed.incorrect,
+        omittedCount: parsed.omittedCount,
+        usageUsed: parsed.usageUsed,
+        usageTotal: parsed.usageTotal,
         total,
         confidence: 0.95,
       };
@@ -137,4 +184,3 @@ export function parseUworldQbankText(rawText: string): ExtractedRow[] {
 
   return Array.from(bestByKey.values());
 }
-

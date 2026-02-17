@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Alert } from "../components/Alert";
 import { BrandHeader } from "../components/BrandHeader";
 import { Card } from "../components/Card";
+import { computeAvgPercentCorrect } from "../lib/avgCorrect";
 import { CATEGORY_LABEL_BY_TYPE, getCategoryOrderForTest } from "../lib/blueprint";
 import {
   clearUploadSession,
@@ -47,6 +48,7 @@ type AccumulatorRow = {
   hasRoi: boolean;
   hasProi: boolean;
   qbankCorrectSum: number;
+  qbankIncorrectSum: number;
   qbankTotalSum: number;
   qbankAccuracySum: number;
   qbankAccuracyCount: number;
@@ -227,8 +229,9 @@ function sortByFocusScore(rows: DisplayRow[]): DisplayRow[] {
 function finalizeAccumulator(value: AccumulatorRow): DisplayRow {
   let avgCorrect: number | undefined;
 
-  if (value.qbankTotalSum > 0) {
-    avgCorrect = clamp01(value.qbankCorrectSum / value.qbankTotalSum);
+  const computedPercent = computeAvgPercentCorrect(value.qbankCorrectSum, value.qbankIncorrectSum);
+  if (typeof computedPercent === "number") {
+    avgCorrect = clamp01(computedPercent / 100);
   } else if (value.qbankAccuracyCount > 0) {
     avgCorrect = clamp01(value.qbankAccuracySum / value.qbankAccuracyCount);
   }
@@ -253,6 +256,7 @@ function finalizeAccumulator(value: AccumulatorRow): DisplayRow {
 
 function aggregateRows(rows: ParsedRow[]): DisplayRow[] {
   const byKey = new Map<string, AccumulatorRow>();
+  const warnedUsageMismatch = new Set<string>();
 
   for (const row of rows) {
     if (row.unmapped || row.weight == null) {
@@ -280,17 +284,42 @@ function aggregateRows(rows: ParsedRow[]): DisplayRow[] {
         hasRoi: hasQbankAccuracy || roi > 0,
         hasProi,
         qbankCorrectSum: 0,
+        qbankIncorrectSum: 0,
         qbankTotalSum: 0,
         qbankAccuracySum: 0,
         qbankAccuracyCount: 0,
       };
 
-      if (typeof row.correct === "number" && typeof row.total === "number" && row.total > 0) {
+      if (typeof row.correct === "number" && typeof row.incorrectCount === "number" && row.incorrectCount >= 0) {
         created.qbankCorrectSum += row.correct;
+        created.qbankIncorrectSum += row.incorrectCount;
+        created.qbankTotalSum += row.correct + row.incorrectCount;
+      } else if (typeof row.correct === "number" && typeof row.total === "number" && row.total > 0) {
+        created.qbankCorrectSum += row.correct;
+        created.qbankIncorrectSum += Math.max(0, row.total - row.correct);
         created.qbankTotalSum += row.total;
       } else if (typeof row.accuracy === "number") {
         created.qbankAccuracySum += clamp01(row.accuracy);
         created.qbankAccuracyCount += 1;
+      }
+
+      if (
+        process.env.NODE_ENV !== "production" &&
+        typeof row.usageUsed === "number" &&
+        typeof row.correct === "number" &&
+        typeof row.incorrectCount === "number"
+      ) {
+        const omitted = typeof row.omittedCount === "number" ? row.omittedCount : 0;
+        const expectedUsage = row.correct + row.incorrectCount + omitted;
+        if (row.usageUsed !== expectedUsage) {
+          const warnKey = `${row.categoryType}::${row.name}`;
+          if (!warnedUsageMismatch.has(warnKey)) {
+            warnedUsageMismatch.add(warnKey);
+            console.warn(
+              `[avg-correct] usage mismatch for "${row.name}": usageUsed=${row.usageUsed}, correct+incorrect+omitted=${expectedUsage}`,
+            );
+          }
+        }
       }
 
       byKey.set(key, created);
@@ -303,12 +332,36 @@ function aggregateRows(rows: ParsedRow[]): DisplayRow[] {
     existing.hasRoi = existing.hasRoi || hasQbankAccuracy || roi > 0;
     existing.hasProi = existing.hasProi || hasProi;
 
-    if (typeof row.correct === "number" && typeof row.total === "number" && row.total > 0) {
+    if (typeof row.correct === "number" && typeof row.incorrectCount === "number" && row.incorrectCount >= 0) {
       existing.qbankCorrectSum += row.correct;
+      existing.qbankIncorrectSum += row.incorrectCount;
+      existing.qbankTotalSum += row.correct + row.incorrectCount;
+    } else if (typeof row.correct === "number" && typeof row.total === "number" && row.total > 0) {
+      existing.qbankCorrectSum += row.correct;
+      existing.qbankIncorrectSum += Math.max(0, row.total - row.correct);
       existing.qbankTotalSum += row.total;
     } else if (typeof row.accuracy === "number") {
       existing.qbankAccuracySum += clamp01(row.accuracy);
       existing.qbankAccuracyCount += 1;
+    }
+
+    if (
+      process.env.NODE_ENV !== "production" &&
+      typeof row.usageUsed === "number" &&
+      typeof row.correct === "number" &&
+      typeof row.incorrectCount === "number"
+    ) {
+      const omitted = typeof row.omittedCount === "number" ? row.omittedCount : 0;
+      const expectedUsage = row.correct + row.incorrectCount + omitted;
+      if (row.usageUsed !== expectedUsage) {
+        const key = `${row.categoryType}::${row.name}`;
+        if (!warnedUsageMismatch.has(key)) {
+          warnedUsageMismatch.add(key);
+          console.warn(
+            `[avg-correct] usage mismatch for "${row.name}": usageUsed=${row.usageUsed}, correct+incorrect+omitted=${expectedUsage}`,
+          );
+        }
+      }
     }
   }
 

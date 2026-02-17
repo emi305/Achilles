@@ -313,6 +313,8 @@ export const MAPPING_CATALOG: {
       "MSK / Skin & Subcutaneous": {
         aliases: [
           "musculoskeletal system and skin",
+          "musculoskeletal sys/skin and subcutaneous tissue",
+          "musculoskeletal sys skin and subcutaneous tissue",
           "musculoskeletal and skin",
           "msk",
           "musculoskeletal",
@@ -451,7 +453,16 @@ export const MAPPING_CATALOG: {
       },
       Cardiovascular: { aliases: ["cardiovascular system", "cardiovascular", "cardio"] },
       "MSK / Skin & Subcutaneous": {
-        aliases: ["rheumatology/orthopedics and sports", "rheumatology orthopedics sports", "dermatology", "derm", "skin", "msk"],
+        aliases: [
+          "rheumatology/orthopedics and sports",
+          "rheumatology orthopedics sports",
+          "musculoskeletal sys/skin and subcutaneous tissue",
+          "musculoskeletal sys skin and subcutaneous tissue",
+          "dermatology",
+          "derm",
+          "skin",
+          "msk",
+        ],
       },
       "Behavioral Health": {
         aliases: [

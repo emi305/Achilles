@@ -18,6 +18,23 @@ function toNumberOrUndefined(value: unknown): number | undefined {
   return undefined;
 }
 
+function toIntOrUndefined(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().replace(/,/g, "");
+    if (!normalized) {
+      return undefined;
+    }
+    const parsed = Number.parseInt(normalized, 10);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return undefined;
+}
+
 function clamp01(value: number) {
   return Math.max(0, Math.min(1, value));
 }
@@ -114,6 +131,10 @@ export function normalizePercentCorrect(row: ExtractedRow): number | null {
 export function normalizeExtractedRow(row: ExtractedRow): ExtractedRow {
   const total = toNumberOrUndefined(row.total);
   let correct = toNumberOrUndefined(row.correct);
+  const incorrectCount = toIntOrUndefined(row.incorrectCount);
+  const omittedCount = toIntOrUndefined(row.omittedCount);
+  const usageUsed = toIntOrUndefined(row.usageUsed);
+  const usageTotal = toIntOrUndefined(row.usageTotal);
   const normalizedPercent = normalizePercentCorrect(row);
 
   if (typeof correct !== "number" && typeof total === "number" && total > 0 && typeof normalizedPercent === "number") {
@@ -124,6 +145,10 @@ export function normalizeExtractedRow(row: ExtractedRow): ExtractedRow {
     ...row,
     total,
     correct,
+    incorrectCount,
+    omittedCount,
+    usageUsed,
+    usageTotal,
     percentCorrect: normalizedPercent ?? undefined,
     proxyWeakness: normalizeProxyWeakness(row.proxyWeakness),
   };
@@ -280,6 +305,10 @@ function buildParsedRow(
   const displayName = canonicalName ?? normalizedRow.name;
   const total = toNumberOrUndefined(normalizedRow.total);
   let correct = toNumberOrUndefined(normalizedRow.correct);
+  const incorrectCount = toIntOrUndefined(normalizedRow.incorrectCount);
+  const omittedCount = toIntOrUndefined(normalizedRow.omittedCount);
+  const usageUsed = toIntOrUndefined(normalizedRow.usageUsed);
+  const usageTotal = toIntOrUndefined(normalizedRow.usageTotal);
   const percentCorrect = toNumberOrUndefined(normalizedRow.percentCorrect);
   const proxyWeakness = normalizeProxyWeakness(normalizedRow.proxyWeakness);
 
@@ -294,7 +323,9 @@ function buildParsedRow(
     correct = Math.round(percentCorrect * total);
   }
 
-  const hasQbankMetrics = typeof total === "number" && typeof correct === "number";
+  const hasQbankMetrics =
+    typeof correct === "number" &&
+    ((typeof total === "number" && total > 0) || (typeof incorrectCount === "number" && incorrectCount >= 0));
   if (!hasQbankMetrics && typeof proxyWeakness !== "number") {
     return {
       warning: `${displayName}: missing both QBank metrics and score-report proxy weakness.`,
@@ -304,11 +335,17 @@ function buildParsedRow(
 
   let qbankTotal: number | undefined;
   let qbankCorrect: number | undefined;
+  let qbankIncorrect: number | undefined;
   let accuracy: number | undefined;
 
   if (hasQbankMetrics) {
-    const safeTotal = total as number;
     const safeCorrect = correct as number;
+    const attemptedFromCounts =
+      typeof incorrectCount === "number" && incorrectCount >= 0 ? safeCorrect + incorrectCount : undefined;
+    const safeTotal =
+      typeof attemptedFromCounts === "number" && attemptedFromCounts > 0
+        ? attemptedFromCounts
+        : (total as number);
 
     if (safeCorrect > safeTotal) {
       return {
@@ -319,6 +356,7 @@ function buildParsedRow(
 
     qbankTotal = safeTotal;
     qbankCorrect = safeCorrect;
+    qbankIncorrect = typeof incorrectCount === "number" ? incorrectCount : undefined;
     accuracy = safeCorrect / safeTotal;
   }
   const weight = canonicalName ? getWeightForCategory(row.categoryType, canonicalName, testType) : null;
@@ -340,6 +378,10 @@ function buildParsedRow(
       canonicalName,
       testType,
       correct: qbankCorrect,
+      incorrectCount: qbankIncorrect,
+      omittedCount,
+      usageUsed,
+      usageTotal,
       total: qbankTotal,
       accuracy,
       weight,

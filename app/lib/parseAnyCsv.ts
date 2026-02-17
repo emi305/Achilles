@@ -56,6 +56,7 @@ function buildRow(
   lineNumber: number,
   testType: TestType,
   source: QbankSource,
+  incorrectCount?: number,
 ): ParsedRow {
   if (!name.trim()) {
     throw new Error(`Missing name on line ${lineNumber}.`);
@@ -71,7 +72,10 @@ function buildRow(
 
   const matched = canonicalizeCategoryName(categoryType, name, testType, source);
   const canonicalName = matched.canonicalName;
-  const accuracy = correct / total;
+  const attemptedForAccuracy =
+    typeof incorrectCount === "number" && incorrectCount >= 0 ? correct + incorrectCount : total;
+  const normalizedTotal = attemptedForAccuracy > 0 ? attemptedForAccuracy : total;
+  const accuracy = normalizedTotal > 0 ? correct / normalizedTotal : 0;
   const weight = canonicalName ? getWeightForCategory(categoryType, canonicalName, testType) : null;
   const roi = (1 - accuracy) * (weight ?? 0);
 
@@ -86,7 +90,8 @@ function buildRow(
     matchScore: matched.matchScore,
     unmapped: matched.matchType === "none" || weight == null,
     correct,
-    total,
+    incorrectCount,
+    total: normalizedTotal,
     accuracy,
     weight,
     roi,
@@ -148,10 +153,12 @@ function parseCategoryPerformance(
 
     const nameRaw = parts[0] ?? "";
     const correctRaw = parts[1] ?? "";
+    const incorrectRaw = parts[2] ?? "";
     const totalRaw = parts[3] ?? "";
     const correct = parseInteger(correctRaw, "correct", lineNumber);
+    const incorrect = parseInteger(incorrectRaw, "incorrect", lineNumber);
     const total = parseInteger(totalRaw, "total", lineNumber);
-    parsedRows.push(buildRow(defaultCategoryType, nameRaw, correct, total, lineNumber, testType, source));
+    parsedRows.push(buildRow(defaultCategoryType, nameRaw, correct, total, lineNumber, testType, source, incorrect));
   }
 
   return parsedRows;
@@ -201,10 +208,12 @@ function parseUworldPerformance(
     if (parts.length === 4) {
       const nameRaw = parts[0] ?? "";
       const correctRaw = parts[1] ?? "";
+      const incorrectRaw = parts[2] ?? "";
       const totalRaw = parts[3] ?? "";
       const correct = parseInteger(correctRaw, "correct", lineNumber);
+      const incorrect = parseInteger(incorrectRaw, "incorrect", lineNumber);
       const total = parseInteger(totalRaw, "total", lineNumber);
-      parsedRows.push(buildRow(categoryType, nameRaw, correct, total, lineNumber, testType, source));
+      parsedRows.push(buildRow(categoryType, nameRaw, correct, total, lineNumber, testType, source, incorrect));
       continue;
     }
 

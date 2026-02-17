@@ -1,5 +1,6 @@
 import { getCategoryCandidates } from "./blueprint";
 import { MAPPING_CATALOG, type QbankSource } from "./mappingCatalog";
+import { normalizeLabel } from "./normalizeLabel";
 import { sanitizeCategoryLabel } from "./textSanitize";
 import type { CategoryType, TestType } from "./types";
 
@@ -38,8 +39,10 @@ function preprocessForExamSpecificMatching(
   categoryType: CategoryType,
   testType: TestType,
 ): string {
+  const normalized = normalizeLabel(sanitized);
+
   if (testType === "comlex2" && categoryType === "clinical_presentation") {
-    let value = sanitized
+    let value = normalized
       .replace(/^patient presentations? related to (the )?/, "")
       .replace(/^patient presentation related to (the )?/, "")
       .replace(/\bsystems\b/g, "system")
@@ -52,14 +55,14 @@ function preprocessForExamSpecificMatching(
   }
 
   if (testType === "comlex2" && categoryType === "competency_domain") {
-    return sanitized
+    return normalized
       .replace(/\s+in osteopathic medicine$/, "")
       .replace(/\s+in osteopathic medical practice$/, "")
       .replace(/\s+for osteopathic medical practice$/, "")
       .trim();
   }
 
-  return sanitized;
+  return normalized;
 }
 
 function getPreparedCatalog(testType: TestType, categoryType: CategoryType): PreparedEntry[] {

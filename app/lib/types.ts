@@ -23,6 +23,10 @@ export type ParsedRow = {
   categoryType: CategoryType;
   name: string;
   correct?: number;
+  incorrectCount?: number;
+  omittedCount?: number;
+  usageUsed?: number;
+  usageTotal?: number;
   total?: number;
   accuracy?: number;
   weight: number | null;
@@ -42,6 +46,10 @@ export type ExtractedRow = {
   name: string;
   mappedCanonicalName?: string;
   correct?: number;
+  incorrectCount?: number;
+  omittedCount?: number;
+  usageUsed?: number;
+  usageTotal?: number;
   total?: number;
   percentCorrect?: number;
   proxyWeakness?: number;
