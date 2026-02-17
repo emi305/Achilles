@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Alert } from "../components/Alert";
 import { BrandHeader } from "../components/BrandHeader";
 import { Card } from "../components/Card";
+import { detectInputSourceFromText } from "../lib/inputSourceDetect";
 import { normalizeExtractRows, normalizeExtractedRow } from "../lib/normalizeExtract";
 import { parseAnyCsv } from "../lib/parseAnyCsv";
 import { clearReviewSession, setReviewSession } from "../lib/reviewSession";
@@ -18,7 +19,7 @@ import {
   isTestType,
   SELECTED_TEST_CHANGED_EVENT,
 } from "../lib/testSelection";
-import type { ExtractResponse, ParsedRow, TestType } from "../lib/types";
+import type { ExtractResponse, InputSource, ParsedRow, TestType } from "../lib/types";
 import type { TemplateId } from "../lib/templates";
 import {
   DEFAULT_SETTINGS,
@@ -163,7 +164,7 @@ export default function UploadPage() {
     }
   };
 
-  const handleAnalyzeAi = async (inputText: string): Promise<ParsedRow[] | null> => {
+  const handleAnalyzeAi = async (inputText: string, inputSourceHint: InputSource): Promise<ParsedRow[] | null> => {
     try {
       const response = await fetch("/api/extract", {
         method: "POST",
@@ -173,6 +174,7 @@ export default function UploadPage() {
         body: JSON.stringify({
           exam: selectedTest,
           rawText: inputText,
+          inputSourceHint,
         }),
       });
 
@@ -188,7 +190,12 @@ export default function UploadPage() {
 
       const extracted = (await response.json()) as ExtractResponse;
       const normalizedExtractedRows = extracted.rows.map((row) => normalizeExtractedRow(row));
-      const normalized = normalizeExtractRows(normalizedExtractedRows, selectedTest);
+      const normalized = normalizeExtractRows(
+        normalizedExtractedRows,
+        selectedTest,
+        inputSourceHint === "uworld_qbank" ? "uworld" : "unknown",
+        inputSourceHint,
+      );
       const combinedWarnings = [...extracted.warnings, ...normalized.warnings];
       const debugReview =
         typeof window !== "undefined" && new URLSearchParams(window.location.search).get("debug") === "1";
@@ -329,13 +336,15 @@ export default function UploadPage() {
       }
 
       const combinedText = sections.join("\n\n").trim();
+      const detectedInputSource =
+        combinedText.length > 0 ? detectInputSourceFromText(combinedText, selectedTest) : "unknown";
 
       let parsedRows: ParsedRow[] | null = [];
       if (combinedText) {
         if (parsingMode === "csv") {
           parsedRows = await handleAnalyzeCsv(combinedText);
         } else {
-          parsedRows = await handleAnalyzeAi(combinedText);
+          parsedRows = await handleAnalyzeAi(combinedText, detectedInputSource);
         }
       } else if (scoreReportProxyRows.length === 0) {
         setErrorMessage("Couldnâ€™t read this file. Try a clearer image or paste text.");
@@ -349,6 +358,11 @@ export default function UploadPage() {
       const examRows = parsedRows.map((row) => ({
         ...row,
         testType: selectedTest,
+        inputSource:
+          row.inputSource ??
+          (selectedTest === "usmle_step2" && (row.categoryType === "uworld_subject" || row.categoryType === "uworld_system")
+            ? "uworld_qbank"
+            : "qbank"),
       }));
       const mergedRows = mergeScoreReportProxyRows(examRows, scoreReportProxyRows, selectedTest).map((row) =>
         normalizeRowForMapping(selectedTest, {

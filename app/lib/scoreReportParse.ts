@@ -231,6 +231,7 @@ export function mergeScoreReportProxyRows(
     return {
       ...row,
       testType: row.testType ?? testType,
+      inputSource: row.inputSource ?? "qbank",
       proxyWeakness,
       proi: proxyWeakness * (row.weight ?? 0),
     };
@@ -245,6 +246,7 @@ export function mergeScoreReportProxyRows(
     const proxyWeakness = clamp01(proxy.proxyWeakness);
     mergedRows.push({
       testType,
+      inputSource: testType === "usmle_step2" ? "usmle_score_report" : "unknown",
       source: "unknown",
       categoryType: proxy.categoryType,
       name: proxy.name,

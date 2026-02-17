@@ -59,6 +59,8 @@ type UnmappedRowGroup = {
   examples: string[];
 };
 
+type Big3Metric = "roi" | "proi";
+
 const modeLabels: Record<RankingMode, string> = {
   roi: "Rank by ROI",
   avg: "Rank by Avg % Correct",
@@ -85,6 +87,57 @@ function formatPercent(value: number) {
 
 function formatScore(value: number) {
   return value.toFixed(3);
+}
+
+function isUworldTaxonomyRow(row: ParsedRow | DisplayRow) {
+  return row.categoryType === "uworld_subject" || row.categoryType === "uworld_system";
+}
+
+function findMetricValue(row: DisplayRow | undefined, metric: Big3Metric) {
+  if (!row) {
+    return null;
+  }
+  if (metric === "roi") {
+    return row.hasRoi ? row.roi : null;
+  }
+  return row.hasProi ? row.proi : null;
+}
+
+function buildBig3Data(rows: DisplayRow[], metric: Big3Metric) {
+  const subjectType: CategoryType = metric === "roi" ? "uworld_subject" : "discipline";
+  const systemType: CategoryType = metric === "roi" ? "uworld_system" : "system";
+  const metricRows = rows.filter((row) =>
+    metric === "roi"
+      ? row.categoryType === subjectType || row.categoryType === systemType
+      : (row.categoryType === subjectType || row.categoryType === systemType) && row.hasProi,
+  );
+
+  const medicineRow =
+    metricRows.find((row) => row.categoryType === subjectType && row.name === "Medicine (IM)") ??
+    metricRows.find((row) => row.categoryType === subjectType);
+  const topSystems = metricRows
+    .filter((row) => row.categoryType === systemType)
+    .sort((a, b) => {
+      const aMetric = metric === "roi" ? a.roi : a.proi;
+      const bMetric = metric === "roi" ? b.roi : b.proi;
+      return bMetric - aMetric;
+    })
+    .slice(0, 3);
+  const biostatsRow = metricRows.find(
+    (row) => row.categoryType === systemType && row.name === "Biostatistics/Epi/Population Health/Med Lit",
+  );
+  const socialRow = metricRows.find(
+    (row) => row.categoryType === systemType && row.name === "Social Sciences (Ethics/Legal/Professionalism/Patient Safety)",
+  );
+
+  return {
+    hasData: metricRows.length > 0,
+    medicineRow,
+    topSystems,
+    biostatsRow,
+    socialRow,
+    combinedBiostatsSocial: (findMetricValue(biostatsRow, metric) ?? 0) + (findMetricValue(socialRow, metric) ?? 0),
+  };
 }
 
 function sortDisplayRows(rows: DisplayRow[], mode: RankingMode): DisplayRow[] {
@@ -379,6 +432,14 @@ export default function ResultsPage() {
   }, [aggregated, categoryOrder, rankingMode]);
 
   const topFive = useMemo(() => sortByFocusScore(aggregated).slice(0, 5), [aggregated]);
+  const big3Roi = useMemo(() => buildBig3Data(aggregated, "roi"), [aggregated]);
+  const big3Proi = useMemo(() => buildBig3Data(aggregated, "proi"), [aggregated]);
+  const hasUworldQbankRows = useMemo(
+    () =>
+      selectedTest === "usmle_step2" &&
+      parsedRows.some((row) => row.inputSource === "uworld_qbank" || isUworldTaxonomyRow(row)),
+    [parsedRows, selectedTest],
+  );
   const hasScoreReport = useMemo(() => {
     const sessionFlag = uploadSession?.scoreReportProvided;
     if (typeof sessionFlag === "boolean") {
@@ -389,6 +450,10 @@ export default function ResultsPage() {
   const unmappedGroups = useMemo<UnmappedRowGroup[]>(() => {
     const map = new Map<string, UnmappedRowGroup>();
     for (const row of parsedRows) {
+      const requiresBlueprintMapping = !(selectedTest === "usmle_step2" && (row.inputSource === "uworld_qbank" || isUworldTaxonomyRow(row)));
+      if (!requiresBlueprintMapping) {
+        continue;
+      }
       if (!row.unmapped && row.weight != null) {
         continue;
       }
@@ -412,17 +477,19 @@ export default function ResultsPage() {
       }
     }
     return Array.from(map.values()).sort((a, b) => b.count - a.count);
-  }, [parsedRows]);
+  }, [parsedRows, selectedTest]);
   const mappingFailureRate = useMemo(() => {
     const qbankRows = parsedRows.filter(
-      (row) => typeof row.accuracy === "number" || (typeof row.correct === "number" && typeof row.total === "number"),
+      (row) =>
+        (typeof row.accuracy === "number" || (typeof row.correct === "number" && typeof row.total === "number")) &&
+        !(selectedTest === "usmle_step2" && (row.inputSource === "uworld_qbank" || isUworldTaxonomyRow(row))),
     );
     if (qbankRows.length === 0) {
       return 0;
     }
     const failed = qbankRows.filter((row) => row.weight == null || row.unmapped).length;
     return failed / qbankRows.length;
-  }, [parsedRows]);
+  }, [parsedRows, selectedTest]);
   const zeusRows = useMemo<ZeusContextRow[]>(
     () =>
       aggregated.map((row) => ({
@@ -650,6 +717,96 @@ export default function ResultsPage() {
           ))}
         </ul>
       </Card>
+
+      {selectedTest === "usmle_step2" ? (
+        <Card>
+          <div className="space-y-1 text-sm text-stone-700">
+            {hasUworldQbankRows ? <p>QBank ROI (UWorld Subjects/Systems)</p> : null}
+            {hasScoreReport ? <p>PROI (Score Report / NBME / Free120)</p> : null}
+          </div>
+        </Card>
+      ) : null}
+
+      {selectedTest === "usmle_step2" && (big3Roi.hasData || big3Proi.hasData) ? (
+        <Card title="Big-3">
+          <p className="text-sm text-stone-700">
+            Big-3 = your highest-impact study targets right now. ROI uses QBank performance; PROI uses score-report
+            weakness. Both already combine how weak you are and how heavily the exam weights that area.
+          </p>
+
+          {big3Roi.hasData ? (
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold text-stone-900">Big-3 (QBank ROI)</h3>
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="rounded-md border border-stone-200 bg-stone-50/40 p-3 text-sm text-stone-800">
+                  <p className="font-semibold text-stone-900">Medicine (IM)</p>
+                  {big3Roi.medicineRow ? (
+                    <p>
+                      ROI: {formatScore(big3Roi.medicineRow.roi)} | Avg % Correct:{" "}
+                      {typeof big3Roi.medicineRow.avgCorrect === "number"
+                        ? formatPercent(big3Roi.medicineRow.avgCorrect)
+                        : "Not available"}{" "}
+                      | Weight: {formatPercent(big3Roi.medicineRow.weight)}
+                    </p>
+                  ) : (
+                    <p>Not available</p>
+                  )}
+                </div>
+                <div className="rounded-md border border-stone-200 bg-stone-50/40 p-3 text-sm text-stone-800">
+                  <p className="font-semibold text-stone-900">Top 3 Systems</p>
+                  <ul className="list-disc pl-5">
+                    {big3Roi.topSystems.map((row) => (
+                      <li key={`big3-roi-system-${row.name}`}>
+                        {row.name}: {formatScore(row.roi)}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="rounded-md border border-stone-200 bg-stone-50/40 p-3 text-sm text-stone-800">
+                  <p className="font-semibold text-stone-900">Biostats + Social</p>
+                  <p>ROI: {formatScore(big3Roi.combinedBiostatsSocial)}</p>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {big3Proi.hasData ? (
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold text-stone-900">Big-3 (Score Report PROI)</h3>
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="rounded-md border border-stone-200 bg-stone-50/40 p-3 text-sm text-stone-800">
+                  <p className="font-semibold text-stone-900">Medicine (IM)</p>
+                  {big3Proi.medicineRow ? (
+                    <p>
+                      PROI: {formatScore(big3Proi.medicineRow.proi)} | Proxy Weakness:{" "}
+                      {typeof big3Proi.medicineRow.proi === "number" && big3Proi.medicineRow.weight > 0
+                        ? formatPercent(big3Proi.medicineRow.proi / big3Proi.medicineRow.weight)
+                        : "Not available"}{" "}
+                      | Weight: {formatPercent(big3Proi.medicineRow.weight)}
+                    </p>
+                  ) : (
+                    <p>Not available</p>
+                  )}
+                </div>
+                <div className="rounded-md border border-stone-200 bg-stone-50/40 p-3 text-sm text-stone-800">
+                  <p className="font-semibold text-stone-900">Top 3 Systems</p>
+                  <ul className="list-disc pl-5">
+                    {big3Proi.topSystems.map((row) => (
+                      <li key={`big3-proi-system-${row.name}`}>
+                        {row.name}: {formatScore(row.proi)}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="rounded-md border border-stone-200 bg-stone-50/40 p-3 text-sm text-stone-800">
+                  <p className="font-semibold text-stone-900">Biostats + Social</p>
+                  <p>PROI: {formatScore(big3Proi.combinedBiostatsSocial)}</p>
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </Card>
+      ) : null}
 
       {unmappedGroups.length > 0 ? (
         <Card title="Unmapped Categories">

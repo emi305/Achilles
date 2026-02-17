@@ -1,7 +1,7 @@
 import { getWeightForCategory } from "./blueprint";
 import { canonicalizeCategoryName } from "./nameMatching";
 import type { QbankSource } from "./mappingCatalog";
-import type { ExtractedRow, NormalizedExtractResult, ParsedRow, TestType } from "./types";
+import type { ExtractedRow, InputSource, NormalizedExtractResult, ParsedRow, TestType } from "./types";
 
 function toNumberOrUndefined(value: unknown): number | undefined {
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -271,6 +271,7 @@ function buildParsedRow(
   row: ExtractedRow,
   testType: TestType,
   source: QbankSource = "unknown",
+  inputSource: InputSource = "unknown",
 ): { parsedRow?: ParsedRow; warning?: string; missingRequired: boolean } {
   const normalizedRow = normalizeExtractedRow(row);
   const nameForMatch = normalizedRow.mappedCanonicalName?.trim() || normalizedRow.name;
@@ -334,6 +335,7 @@ function buildParsedRow(
     parsedRow: {
       categoryType: normalizedRow.categoryType,
       source,
+      inputSource,
       name: canonicalName ?? normalizedRow.name,
       canonicalName,
       testType,
@@ -357,7 +359,12 @@ function buildParsedRow(
   };
 }
 
-export function normalizeExtractRows(rows: ExtractedRow[], testType: TestType): NormalizedExtractResult {
+export function normalizeExtractRows(
+  rows: ExtractedRow[],
+  testType: TestType,
+  source: QbankSource = "unknown",
+  inputSource: InputSource = "unknown",
+): NormalizedExtractResult {
   const warnings: string[] = [];
   const parsedRows: ParsedRow[] = [];
   let hasMissingRequired = false;
@@ -366,7 +373,7 @@ export function normalizeExtractRows(rows: ExtractedRow[], testType: TestType): 
     const expandedRows = expandCombinedCategories(row, testType);
 
     for (const expandedRow of expandedRows) {
-      const result = buildParsedRow(expandedRow, testType, "unknown");
+      const result = buildParsedRow(expandedRow, testType, source, inputSource);
       if (result.warning) {
         warnings.push(result.warning);
       }

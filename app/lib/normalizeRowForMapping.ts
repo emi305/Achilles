@@ -63,6 +63,11 @@ export function normalizeRowForMapping(testType: TestType, row: ParsedRow): Pars
       : typeof row.proi === "number"
         ? row.proi
         : undefined;
+  const inferredInputSource =
+    row.inputSource ??
+    (testType === "usmle_step2" && (recoveredTypeRaw === "uworld_subject" || recoveredTypeRaw === "uworld_system")
+      ? "uworld_qbank"
+      : undefined);
 
   return {
     ...row,
@@ -75,6 +80,7 @@ export function normalizeRowForMapping(testType: TestType, row: ParsedRow): Pars
     weight,
     roi,
     proi,
+    inputSource: inferredInputSource,
     matchType: matched.matchType,
     matchScore: matched.matchScore,
     unmapped: matched.matchType === "none" || weight == null,

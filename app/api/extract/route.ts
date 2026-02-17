@@ -2,13 +2,14 @@ import { NextResponse } from "next/server";
 import { computeOverallConfidence } from "../../lib/confidence";
 import { getAllowedCategoryTypes } from "../../lib/blueprint";
 import { isTestType } from "../../lib/testSelection";
-import type { CategoryType, ExtractedRow, ExtractResponse, TestType } from "../../lib/types";
+import type { CategoryType, ExtractedRow, ExtractResponse, InputSource, TestType } from "../../lib/types";
 
 export const runtime = "nodejs";
 
 type ExtractRequest = {
   exam: TestType;
   rawText: string;
+  inputSourceHint?: InputSource;
 };
 
 type OpenAIChatResponse = {
@@ -22,7 +23,36 @@ type OpenAIChatResponse = {
 const API_URL = "https://api.openai.com/v1/chat/completions";
 const DEFAULT_MODEL = "gpt-4.1-mini";
 
-function getSystemPrompt(exam: TestType): string {
+function getSystemPrompt(exam: TestType, inputSourceHint: InputSource): string {
+  if (exam === "usmle_step2" && inputSourceHint === "uworld_qbank") {
+    return `You extract USMLE Step 2 UWorld QBank rows from messy text and pasted tables.
+
+Return JSON only with this exact shape:
+{
+  "rows": [
+    {
+      "categoryType": string,
+      "name": string,
+      "mappedCanonicalName": string | null,
+      "correct": number | null,
+      "total": number | null,
+      "percentCorrect": number | null,
+      "proxyWeakness": number | null,
+      "confidence": number
+    }
+  ],
+  "warnings": string[]
+}
+
+Rules:
+- For UWorld QBank extraction, use ONLY categoryType values: "uworld_subject" or "uworld_system".
+- Do not emit discipline/system/physician_task for this mode.
+- Extract only rows with at least total questions or percent correct.
+- confidence must be 0..1.
+- If insufficient data, return rows: [] and warnings.
+- Never include markdown or commentary, only valid JSON.`;
+  }
+
   const examInstructions =
     exam === "usmle_step2"
       ? [
@@ -127,6 +157,7 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json()) as Partial<ExtractRequest>;
     const exam: TestType = isTestType(body.exam) ? body.exam : "comlex2";
+    const inputSourceHint: InputSource = body.inputSourceHint ?? "unknown";
     const rawText = typeof body.rawText === "string" ? body.rawText.trim() : "";
 
     if (!rawText) {
@@ -145,7 +176,10 @@ export async function POST(request: Request) {
       );
     }
 
-    const allowedCategoryTypes = getAllowedCategoryTypes(exam);
+    const allowedCategoryTypes =
+      exam === "usmle_step2" && inputSourceHint === "uworld_qbank"
+        ? (["uworld_subject", "uworld_system"] satisfies CategoryType[])
+        : getAllowedCategoryTypes(exam);
     const model = process.env.OPENAI_MODEL ?? DEFAULT_MODEL;
     const completionResponse = await fetch(API_URL, {
       method: "POST",
@@ -157,7 +191,7 @@ export async function POST(request: Request) {
         model,
         temperature: 0.1,
         messages: [
-          { role: "system", content: getSystemPrompt(exam) },
+          { role: "system", content: getSystemPrompt(exam, inputSourceHint) },
           {
             role: "user",
             content: `Exam: ${exam}\n\nRaw input:\n${rawText}`,

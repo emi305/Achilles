@@ -1,5 +1,13 @@
 export type TestType = "comlex2" | "usmle_step2";
 
+export type InputSource =
+  | "uworld_qbank"
+  | "usmle_score_report"
+  | "nbme"
+  | "free120"
+  | "qbank"
+  | "unknown";
+
 export type CategoryType =
   | "competency_domain"
   | "clinical_presentation"
@@ -11,6 +19,7 @@ export type CategoryType =
 
 export type ParsedRow = {
   testType?: TestType;
+  inputSource?: InputSource;
   categoryType: CategoryType;
   name: string;
   correct?: number;

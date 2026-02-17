@@ -262,8 +262,8 @@ export const MAPPING_CATALOG: {
   },
   usmle_step2: {
     discipline: {
-      Medicine: {
-        aliases: ["internal medicine", "im", "medicine internal", "adult medicine", "medicine (internal)"],
+      "Medicine (IM)": {
+        aliases: ["medicine", "internal medicine", "im", "medicine internal", "adult medicine", "medicine (internal)"],
       },
       Surgery: {
         aliases: ["surg", "general surgery"],
@@ -288,7 +288,103 @@ export const MAPPING_CATALOG: {
       },
     },
     system: {
-      "Social Sciences (Ethics/Safety/Legal)": {
+      "Renal/Urinary & Reproductive": {
+        aliases: [
+          "renal",
+          "gu",
+          "genitourinary",
+          "urology",
+          "urinary",
+          "reproductive",
+          "repro",
+          "renal/gu",
+          "gu/repro",
+          "renal urinary systems and electrolytes",
+          "renal urinary systems and electrolytes",
+          "male reproductive system",
+          "female reproductive system and breast",
+          "female reproductive system",
+        ],
+      },
+      Cardiovascular: {
+        aliases: ["cardiovascular system", "cardiovascular", "cardio", "cv"],
+      },
+      "MSK / Skin & Subcutaneous": {
+        aliases: [
+          "musculoskeletal system and skin",
+          "musculoskeletal and skin",
+          "msk",
+          "musculoskeletal",
+          "msk and skin",
+          "msk/skin",
+          "msk/derm",
+          "rheumatology/orthopedics and sports",
+          "rheumatology orthopedics and sports",
+          "dermatology",
+          "derm",
+          "skin",
+        ],
+      },
+      "Behavioral Health": {
+        aliases: [
+          "behavioral health",
+          "psychiatric/behavioral and substance use disorder",
+          "psychiatric behavioral and substance use disorder",
+          "behavioral and substance use disorder",
+        ],
+      },
+      Gastrointestinal: {
+        aliases: ["gastrointestinal system", "gastrointestinal", "gi", "gastrointestinal and nutrition"],
+      },
+      "Nervous System & Special Senses": {
+        aliases: [
+          "nervous system and special senses",
+          "nervous system",
+          "neuro",
+          "ophthalmology",
+          "ophtho",
+          "ear nose and throat",
+          "ent",
+          "special senses",
+        ],
+      },
+      Respiratory: {
+        aliases: ["resp", "pulm", "pulmonary", "respiratory", "respiratory system", "pulmonary and critical care"],
+      },
+      "Multisystem Processes & Disorders": {
+        aliases: [
+          "multisystem processes and disorders",
+          "miscellaneous multisystem",
+          "miscellaneous (multisystem)",
+          "multisystem",
+          "infectious diseases",
+          "infectious disease",
+          "general principles",
+        ],
+      },
+      Endocrine: {
+        aliases: ["endocrine", "endocrine diabetes and metabolism", "endocrine, diabetes and metabolism"],
+      },
+      "Pregnancy/Childbirth & Puerperium": {
+        aliases: ["pregnancy childbirth and puerperium", "pregnancy, childbirth and puerperium"],
+      },
+      "Blood & Lymphoreticular": {
+        aliases: ["blood and lymphoreticular", "hematology and oncology", "heme onc", "hematology & oncology"],
+      },
+      Immune: {
+        aliases: ["immune", "allergy and immunology", "allergy & immunology"],
+      },
+      "Biostatistics/Epi/Population Health/Med Lit": {
+        aliases: [
+          "biostatistics and epidemiology",
+          "biostats and epidemiology",
+          "biostats & epidemiology",
+          "biostatistics & epidemiology",
+          "population health",
+          "medical literature",
+        ],
+      },
+      "Social Sciences (Ethics/Legal/Professionalism/Patient Safety)": {
         aliases: [
           "ethics",
           "patient safety",
@@ -303,21 +399,6 @@ export const MAPPING_CATALOG: {
           "professionalism",
         ],
       },
-      "Renal/Urinary & Reproductive": {
-        aliases: ["renal", "gu", "genitourinary", "urology", "urinary", "reproductive", "repro", "renal/gu", "gu/repro"],
-      },
-      "Cardiovascular System": {
-        aliases: ["cardio", "cardiovascular", "cv"],
-      },
-      "Musculoskeletal System & Skin": {
-        aliases: ["msk", "musculoskeletal", "msk & skin", "msk/skin", "musculoskeletal and skin", "msk/derm", "derm", "dermatology", "skin"],
-      },
-      "Gastrointestinal System": {
-        aliases: ["gi", "gastrointestinal"],
-      },
-      "Respiratory System": {
-        aliases: ["resp", "pulm", "pulmonary", "respiratory"],
-      },
     },
     physician_task: {
       "Patient Care: Management": {
@@ -331,7 +412,7 @@ export const MAPPING_CATALOG: {
       },
     },
     uworld_subject: {
-      Medicine: {
+      "Medicine (IM)": {
         aliases: ["medicine", "internal medicine", "im"],
       },
       "Obstetrics & Gynecology": {
@@ -348,35 +429,41 @@ export const MAPPING_CATALOG: {
       },
     },
     uworld_system: {
-      "Allergy & Immunology": { aliases: ["allergy and immunology", "allergy & immunology"] },
-      "Biostatistics & Epidemiology": { aliases: ["biostats & epidemiology", "biostatistics and epidemiology"] },
-      "Cardiovascular System": { aliases: ["cardiovascular", "cardio"] },
-      Dermatology: { aliases: ["dermatology", "derm"] },
-      "Ear, Nose & Throat (ENT)": { aliases: ["ear nose and throat", "ent"] },
-      "Endocrine, Diabetes & Metabolism": { aliases: ["endocrine diabetes and metabolism"] },
-      "Female Reproductive System & Breast": { aliases: ["female reproductive system and breast"] },
-      "Gastrointestinal & Nutrition": { aliases: ["gastrointestinal and nutrition", "gi and nutrition"] },
-      "General Principles": { aliases: ["general principles"] },
-      "Hematology & Oncology": { aliases: ["hematology and oncology", "heme onc"] },
-      "Infectious Diseases": { aliases: ["infectious disease", "infectious diseases"] },
-      "Male Reproductive System": { aliases: ["male reproductive system"] },
-      "Miscellaneous (Multisystem)": { aliases: ["miscellaneous multisystem", "multisystem"] },
-      "Nervous System": { aliases: ["nervous system", "neuro"] },
-      Ophthalmology: { aliases: ["ophthalmology", "ophtho"] },
-      "Poisoning & Environmental Exposure": { aliases: ["poisoning and environmental exposure"] },
-      "Pregnancy, Childbirth & Puerperium": { aliases: ["pregnancy childbirth and puerperium"] },
-      "Psychiatric/Behavioral & Substance Use Disorder": {
-        aliases: ["psychiatric behavioral and substance use disorder", "behavioral and substance use disorder"],
+      "Renal/Urinary & Reproductive": {
+        aliases: [
+          "renal urinary systems and electrolytes",
+          "renal urinary and electrolytes",
+          "male reproductive system",
+          "female reproductive system and breast",
+          "female reproductive system",
+          "renal",
+          "urinary",
+          "repro",
+          "gu",
+        ],
       },
-      "Pulmonary & Critical Care": { aliases: ["pulmonary and critical care", "pulm critical care"] },
-      "Renal, Urinary Systems & Electrolytes": {
-        aliases: ["renal urinary systems and electrolytes", "renal urinary and electrolytes"],
+      Cardiovascular: { aliases: ["cardiovascular system", "cardiovascular", "cardio"] },
+      "MSK / Skin & Subcutaneous": {
+        aliases: ["rheumatology/orthopedics and sports", "rheumatology orthopedics sports", "dermatology", "derm", "skin", "msk"],
       },
-      "Rheumatology/Orthopedics & Sports": {
-        aliases: ["rheumatology orthopedics and sports", "rheumatology orthopedics sports"],
+      "Behavioral Health": {
+        aliases: ["psychiatric/behavioral and substance use disorder", "psychiatric behavioral and substance use disorder", "behavioral and substance use disorder"],
       },
-      "Social Sciences (Ethics/Legal/Professional)": {
-        aliases: ["social sciences", "social science", "ethics legal professional"],
+      Gastrointestinal: { aliases: ["gastrointestinal and nutrition", "gi and nutrition", "gastrointestinal"] },
+      "Nervous System & Special Senses": { aliases: ["nervous system", "ophthalmology", "ophtho", "ear nose and throat", "ent"] },
+      Respiratory: { aliases: ["pulmonary and critical care", "pulm critical care", "respiratory"] },
+      "Multisystem Processes & Disorders": {
+        aliases: ["miscellaneous multisystem", "miscellaneous (multisystem)", "multisystem", "infectious diseases", "infectious disease", "general principles", "poisoning and environmental exposure"],
+      },
+      Endocrine: { aliases: ["endocrine diabetes and metabolism", "endocrine", "metabolism"] },
+      "Pregnancy/Childbirth & Puerperium": { aliases: ["pregnancy childbirth and puerperium", "pregnancy, childbirth and puerperium"] },
+      "Blood & Lymphoreticular": { aliases: ["hematology and oncology", "heme onc", "hematology oncology"] },
+      Immune: { aliases: ["allergy and immunology", "allergy & immunology", "immunology"] },
+      "Biostatistics/Epi/Population Health/Med Lit": {
+        aliases: ["biostats & epidemiology", "biostatistics and epidemiology", "biostatistics & epidemiology", "population health"],
+      },
+      "Social Sciences (Ethics/Legal/Professionalism/Patient Safety)": {
+        aliases: ["social sciences", "social science", "ethics legal professional", "ethics", "patient safety", "legal", "professionalism"],
       },
     },
   },
