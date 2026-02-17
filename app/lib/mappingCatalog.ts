@@ -299,6 +299,7 @@ export const MAPPING_CATALOG: {
           "repro",
           "renal/gu",
           "gu/repro",
+          "renal, urinary systems and electrolytes",
           "renal urinary systems and electrolytes",
           "renal urinary systems and electrolytes",
           "male reproductive system",
@@ -329,6 +330,7 @@ export const MAPPING_CATALOG: {
         aliases: [
           "behavioral health",
           "psychiatric/behavioral and substance use disorder",
+          "psychiatric/behavioral & substance use disorder",
           "psychiatric behavioral and substance use disorder",
           "behavioral and substance use disorder",
         ],
@@ -360,6 +362,7 @@ export const MAPPING_CATALOG: {
           "infectious diseases",
           "infectious disease",
           "general principles",
+          "poisoning and environmental exposure",
         ],
       },
       Endocrine: {
@@ -395,6 +398,9 @@ export const MAPPING_CATALOG: {
           "qi",
           "social science",
           "social sciences",
+          "social sciences (ethics/legal/professional)",
+          "social sciences ethics/legal/professional",
+          "social sciences ethics legal professional",
           "communication",
           "professionalism",
         ],
@@ -431,6 +437,7 @@ export const MAPPING_CATALOG: {
     uworld_system: {
       "Renal/Urinary & Reproductive": {
         aliases: [
+          "renal, urinary systems and electrolytes",
           "renal urinary systems and electrolytes",
           "renal urinary and electrolytes",
           "male reproductive system",
@@ -447,15 +454,28 @@ export const MAPPING_CATALOG: {
         aliases: ["rheumatology/orthopedics and sports", "rheumatology orthopedics sports", "dermatology", "derm", "skin", "msk"],
       },
       "Behavioral Health": {
-        aliases: ["psychiatric/behavioral and substance use disorder", "psychiatric behavioral and substance use disorder", "behavioral and substance use disorder"],
+        aliases: [
+          "psychiatric/behavioral and substance use disorder",
+          "psychiatric/behavioral & substance use disorder",
+          "psychiatric behavioral and substance use disorder",
+          "behavioral and substance use disorder",
+        ],
       },
       Gastrointestinal: { aliases: ["gastrointestinal and nutrition", "gi and nutrition", "gastrointestinal"] },
       "Nervous System & Special Senses": { aliases: ["nervous system", "ophthalmology", "ophtho", "ear nose and throat", "ent"] },
       Respiratory: { aliases: ["pulmonary and critical care", "pulm critical care", "respiratory"] },
       "Multisystem Processes & Disorders": {
-        aliases: ["miscellaneous multisystem", "miscellaneous (multisystem)", "multisystem", "infectious diseases", "infectious disease", "general principles", "poisoning and environmental exposure"],
+        aliases: [
+          "miscellaneous multisystem",
+          "miscellaneous (multisystem)",
+          "multisystem",
+          "infectious diseases",
+          "infectious disease",
+          "general principles",
+          "poisoning and environmental exposure",
+        ],
       },
-      Endocrine: { aliases: ["endocrine diabetes and metabolism", "endocrine", "metabolism"] },
+      Endocrine: { aliases: ["endocrine, diabetes and metabolism", "endocrine diabetes and metabolism", "endocrine", "metabolism"] },
       "Pregnancy/Childbirth & Puerperium": { aliases: ["pregnancy childbirth and puerperium", "pregnancy, childbirth and puerperium"] },
       "Blood & Lymphoreticular": { aliases: ["hematology and oncology", "heme onc", "hematology oncology"] },
       Immune: { aliases: ["allergy and immunology", "allergy & immunology", "immunology"] },
@@ -463,7 +483,18 @@ export const MAPPING_CATALOG: {
         aliases: ["biostats & epidemiology", "biostatistics and epidemiology", "biostatistics & epidemiology", "population health"],
       },
       "Social Sciences (Ethics/Legal/Professionalism/Patient Safety)": {
-        aliases: ["social sciences", "social science", "ethics legal professional", "ethics", "patient safety", "legal", "professionalism"],
+        aliases: [
+          "social sciences",
+          "social science",
+          "social sciences (ethics/legal/professional)",
+          "social sciences ethics/legal/professional",
+          "social sciences ethics legal professional",
+          "ethics legal professional",
+          "ethics",
+          "patient safety",
+          "legal",
+          "professionalism",
+        ],
       },
     },
   },

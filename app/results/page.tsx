@@ -15,6 +15,7 @@ import {
   subscribeUploadSession,
 } from "../lib/session";
 import { DEFAULT_TEST_TYPE, getTestLabel } from "../lib/testSelection";
+import { USMLE_STEP2_SUBJECT_WEIGHTS, USMLE_STEP2_SYSTEM_WEIGHTS } from "../lib/usmleStep2Weights";
 import type { CategoryType, ParsedRow, TestType, ZeusContext, ZeusContextRow } from "../lib/types";
 import { getProiScore, getRoiScore, type RankingMode } from "../lib/priority";
 
@@ -93,16 +94,6 @@ function isUworldTaxonomyRow(row: ParsedRow | DisplayRow) {
   return row.categoryType === "uworld_subject" || row.categoryType === "uworld_system";
 }
 
-function findMetricValue(row: DisplayRow | undefined, metric: Big3Metric) {
-  if (!row) {
-    return null;
-  }
-  if (metric === "roi") {
-    return row.hasRoi ? row.roi : null;
-  }
-  return row.hasProi ? row.proi : null;
-}
-
 function buildBig3Data(rows: DisplayRow[], metric: Big3Metric) {
   const subjectType: CategoryType = metric === "roi" ? "uworld_subject" : "discipline";
   const systemType: CategoryType = metric === "roi" ? "uworld_system" : "system";
@@ -136,8 +127,59 @@ function buildBig3Data(rows: DisplayRow[], metric: Big3Metric) {
     topSystems,
     biostatsRow,
     socialRow,
-    combinedBiostatsSocial: (findMetricValue(biostatsRow, metric) ?? 0) + (findMetricValue(socialRow, metric) ?? 0),
   };
+}
+
+function withUsmleCanonicalCoverage(rows: DisplayRow[], selectedTest: TestType): DisplayRow[] {
+  if (selectedTest !== "usmle_step2") {
+    return rows;
+  }
+
+  const byKey = new Map<string, DisplayRow>();
+  for (const row of rows) {
+    byKey.set(`${row.categoryType}::${row.name}`, row);
+  }
+  const filled = [...rows];
+
+  for (const [name, weight] of Object.entries(USMLE_STEP2_SUBJECT_WEIGHTS)) {
+    const key = `uworld_subject::${name}`;
+    if (byKey.has(key)) {
+      continue;
+    }
+    filled.push({
+      categoryType: "uworld_subject",
+      name,
+      weight,
+      roi: 0,
+      proi: 0,
+      hasRoi: true,
+      hasProi: false,
+      avgCorrect: undefined,
+      weaknessForSort: 0,
+      focusScore: 0,
+    });
+  }
+
+  for (const [name, weight] of Object.entries(USMLE_STEP2_SYSTEM_WEIGHTS)) {
+    const key = `uworld_system::${name}`;
+    if (byKey.has(key)) {
+      continue;
+    }
+    filled.push({
+      categoryType: "uworld_system",
+      name,
+      weight,
+      roi: 0,
+      proi: 0,
+      hasRoi: true,
+      hasProi: false,
+      avgCorrect: undefined,
+      weaknessForSort: 0,
+      focusScore: 0,
+    });
+  }
+
+  return filled;
 }
 
 function sortDisplayRows(rows: DisplayRow[], mode: RankingMode): DisplayRow[] {
@@ -346,7 +388,17 @@ function buildWhatToStudyBullets(row: DisplayRow, ranks: RankContext, hasScoreRe
   return bullets;
 }
 
-function RankTable({ title, rows, mode }: { title: string; rows: DisplayRow[]; mode: RankingMode }) {
+function RankTable({
+  title,
+  rows,
+  mode,
+  showProiColumn,
+}: {
+  title: string;
+  rows: DisplayRow[];
+  mode: RankingMode;
+  showProiColumn: boolean;
+}) {
   return (
     <Card title={title}>
       <div className="overflow-x-auto">
@@ -358,7 +410,7 @@ function RankTable({ title, rows, mode }: { title: string; rows: DisplayRow[]; m
               {mode === "roi" ? (
                 <>
                   <th className="px-3 py-2">ROI (QBank)</th>
-                  <th className="px-3 py-2">PROI (Score Report)</th>
+                  {showProiColumn ? <th className="px-3 py-2">PROI (Score Report)</th> : null}
                 </>
               ) : (
                 <th className="px-3 py-2">Avg % Correct</th>
@@ -373,7 +425,11 @@ function RankTable({ title, rows, mode }: { title: string; rows: DisplayRow[]; m
                 {mode === "roi" ? (
                   <>
                     <td className="px-3 py-2 text-stone-700">{row.hasRoi ? formatScore(row.roi) : "-"}</td>
-                    <td className="px-3 py-2 text-stone-700">{row.hasProi ? formatScore(row.proi) : PROI_PLACEHOLDER}</td>
+                    {showProiColumn ? (
+                      <td className="px-3 py-2 text-stone-700">
+                        {row.hasProi ? formatScore(row.proi) : PROI_PLACEHOLDER}
+                      </td>
+                    ) : null}
                   </>
                 ) : (
                   <td className="px-3 py-2 text-stone-700">
@@ -400,7 +456,7 @@ export default function ResultsPage() {
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const parsedRows = useSyncExternalStore(subscribeUploadSession, getClientParsedRows, getServerParsedRows);
   const uploadSession = getUploadSession();
-  const aggregated = useMemo(() => aggregateRows(parsedRows), [parsedRows]);
+  const rawAggregated = useMemo(() => aggregateRows(parsedRows), [parsedRows]);
   const selectedTest = useMemo<TestType>(() => {
     const fromSession = getUploadSession()?.selectedTest;
     if (fromSession) {
@@ -409,6 +465,7 @@ export default function ResultsPage() {
     const fromRows = parsedRows.find((row) => row.testType)?.testType;
     return fromRows ?? DEFAULT_TEST_TYPE;
   }, [parsedRows]);
+  const aggregated = useMemo(() => withUsmleCanonicalCoverage(rawAggregated, selectedTest), [rawAggregated, selectedTest]);
   const categoryOrder = useMemo(() => getCategoryOrderForTest(selectedTest), [selectedTest]);
 
   const sections = useMemo<TableSection[]>(() => {
@@ -419,7 +476,12 @@ export default function ResultsPage() {
         title: `${CATEGORY_LABEL_BY_TYPE[categoryType]} Rank List`,
         rows: sortDisplayRows(getSectionRows(generalRows, categoryType), rankingMode),
       }))
-      .filter((section) => section.rows.length > 0);
+      .filter(
+        (section) =>
+          section.rows.length > 0 ||
+          (selectedTest === "usmle_step2" &&
+            (section.key === "uworld_subject" || section.key === "uworld_system")),
+      );
 
     return [
       {
@@ -429,7 +491,7 @@ export default function ResultsPage() {
       },
       ...categorySections,
     ];
-  }, [aggregated, categoryOrder, rankingMode]);
+  }, [aggregated, categoryOrder, rankingMode, selectedTest]);
 
   const topFive = useMemo(() => sortByFocusScore(aggregated).slice(0, 5), [aggregated]);
   const big3Roi = useMemo(() => buildBig3Data(aggregated, "roi"), [aggregated]);
@@ -447,6 +509,7 @@ export default function ResultsPage() {
     }
     return parsedRows.some((row) => typeof row.proxyWeakness === "number");
   }, [parsedRows, uploadSession]);
+  const showProiColumn = useMemo(() => hasScoreReport && aggregated.some((row) => row.hasProi), [aggregated, hasScoreReport]);
   const unmappedGroups = useMemo<UnmappedRowGroup[]>(() => {
     const map = new Map<string, UnmappedRowGroup>();
     for (const row of parsedRows) {
@@ -663,14 +726,18 @@ export default function ResultsPage() {
           <p className="text-stone-600">
             Higher ROI = bigger score gain if you improve this category (from QBank performance).
           </p>
-          <p>PROI = (proxyWeakness) x weight</p>
-          <p className="text-stone-600">
-            Higher PROI = bigger score gain if you improve this category (estimated from score report graph bars).
-          </p>
-          <p className="text-stone-600">
-            Score reports don&apos;t provide per-category correct/total, so proxyWeakness is extracted from the score report
-            graphs.
-          </p>
+          {showProiColumn ? (
+            <>
+              <p>PROI = (proxyWeakness) x weight</p>
+              <p className="text-stone-600">
+                Higher PROI = bigger score gain if you improve this category (estimated from score report graph bars).
+              </p>
+              <p className="text-stone-600">
+                Score reports don&apos;t provide per-category correct/total, so proxyWeakness is extracted from the score
+                report graphs.
+              </p>
+            </>
+          ) : null}
         </div>
       </Card>
 
@@ -688,9 +755,9 @@ export default function ResultsPage() {
                 {row.name} ({CATEGORY_LABEL_BY_TYPE[row.categoryType]})
               </p>
               <p>
-                Weight: {formatPercent(row.weight)} | ROI: {row.hasRoi ? formatScore(row.roi) : "-"} | PROI:{" "}
-                {row.hasProi ? formatScore(row.proi) : PROI_PLACEHOLDER} | Avg % Correct:{" "}
-                {typeof row.avgCorrect === "number" ? formatPercent(row.avgCorrect) : "Not available"}
+                Weight: {formatPercent(row.weight)} | ROI: {row.hasRoi ? formatScore(row.roi) : "-"}
+                {showProiColumn ? ` | PROI: ${row.hasProi ? formatScore(row.proi) : PROI_PLACEHOLDER}` : ""}
+                {" | "}Avg % Correct: {typeof row.avgCorrect === "number" ? formatPercent(row.avgCorrect) : "Not available"}
               </p>
             </li>
           ))}
@@ -757,14 +824,15 @@ export default function ResultsPage() {
                   <ul className="list-disc pl-5">
                     {big3Roi.topSystems.map((row) => (
                       <li key={`big3-roi-system-${row.name}`}>
-                        {row.name}: {formatScore(row.roi)}
+                        {row.name} (ROI): {formatScore(row.roi)}
                       </li>
                     ))}
                   </ul>
                 </div>
                 <div className="rounded-md border border-stone-200 bg-stone-50/40 p-3 text-sm text-stone-800">
                   <p className="font-semibold text-stone-900">Biostats + Social</p>
-                  <p>ROI: {formatScore(big3Roi.combinedBiostatsSocial)}</p>
+                  <p>Biostats ROI: {formatScore(big3Roi.biostatsRow?.roi ?? 0)}</p>
+                  <p>Social Sciences ROI: {formatScore(big3Roi.socialRow?.roi ?? 0)}</p>
                 </div>
               </div>
             </div>
@@ -793,14 +861,15 @@ export default function ResultsPage() {
                   <ul className="list-disc pl-5">
                     {big3Proi.topSystems.map((row) => (
                       <li key={`big3-proi-system-${row.name}`}>
-                        {row.name}: {formatScore(row.proi)}
+                        {row.name} (PROI): {formatScore(row.proi)}
                       </li>
                     ))}
                   </ul>
                 </div>
                 <div className="rounded-md border border-stone-200 bg-stone-50/40 p-3 text-sm text-stone-800">
                   <p className="font-semibold text-stone-900">Biostats + Social</p>
-                  <p>PROI: {formatScore(big3Proi.combinedBiostatsSocial)}</p>
+                  <p>Biostats PROI: {formatScore(big3Proi.biostatsRow?.proi ?? 0)}</p>
+                  <p>Social Sciences PROI: {formatScore(big3Proi.socialRow?.proi ?? 0)}</p>
                 </div>
               </div>
             </div>
@@ -909,7 +978,13 @@ export default function ResultsPage() {
 
       {showRestOfData
         ? sections.map((section) => (
-            <RankTable key={section.key} title={section.title} rows={section.rows} mode={rankingMode} />
+            <RankTable
+              key={section.key}
+              title={section.title}
+              rows={section.rows}
+              mode={rankingMode}
+              showProiColumn={showProiColumn}
+            />
           ))
         : null}
 

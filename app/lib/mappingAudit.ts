@@ -394,13 +394,35 @@ if (process.argv.includes("--run")) {
     { raw: "Hematology & Oncology", type: "uworld_system", expected: "Blood & Lymphoreticular" },
     { raw: "Infectious Diseases", type: "uworld_system", expected: "Multisystem Processes & Disorders" },
     { raw: "Pulmonary & Critical Care", type: "uworld_system", expected: "Respiratory" },
+    {
+      raw: "Psychiatric/Behavioral & Substance Use Disorder",
+      type: "uworld_system",
+      expected: "Behavioral Health",
+    },
     { raw: "Cardiovascular System", type: "uworld_system", expected: "Cardiovascular" },
     { raw: "Gastrointestinal & Nutrition", type: "uworld_system", expected: "Gastrointestinal" },
+    { raw: "Endocrine, Diabetes & Metabolism", type: "uworld_system", expected: "Endocrine" },
+    {
+      raw: "Renal, Urinary Systems & Electrolytes",
+      type: "uworld_system",
+      expected: "Renal/Urinary & Reproductive",
+    },
     {
       raw: "Female Reproductive System & Breast",
       type: "uworld_system",
       expected: "Renal/Urinary & Reproductive",
     },
+    { raw: "Male Reproductive System", type: "uworld_system", expected: "Renal/Urinary & Reproductive" },
+    { raw: "Allergy & Immunology", type: "uworld_system", expected: "Immune" },
+    { raw: "Rheumatology/Orthopedics & Sports", type: "uworld_system", expected: "MSK / Skin & Subcutaneous" },
+    { raw: "Dermatology", type: "uworld_system", expected: "MSK / Skin & Subcutaneous" },
+    { raw: "Ophthalmology", type: "uworld_system", expected: "Nervous System & Special Senses" },
+    {
+      raw: "Social Sciences (Ethics/Legal/Professional)",
+      type: "uworld_system",
+      expected: "Social Sciences (Ethics/Legal/Professionalism/Patient Safety)",
+    },
+    { raw: "General Principles", type: "uworld_system", expected: "Multisystem Processes & Disorders" },
     { raw: "Pregnancy, Childbirth & Puerperium", type: "uworld_system", expected: "Pregnancy/Childbirth & Puerperium" },
   ];
   const failedUworldVariants = uworldVariantChecks.filter((check) => {
@@ -460,6 +482,28 @@ if (process.argv.includes("--run")) {
     for (const row of invalidUworldRows) {
       console.error(`- ${row.originalName ?? row.name} (${row.categoryType}) weight=${row.weight} unmapped=${String(row.unmapped)}`);
     }
+    process.exitCode = 1;
+  }
+
+  const behavioralSample = normalizeExtractRows(
+    [
+      {
+        categoryType: "uworld_system",
+        name: "Psychiatric/Behavioral & Substance Use Disorder",
+        correct: 71,
+        total: 145,
+        confidence: 1,
+      },
+    ],
+    "usmle_step2",
+    "uworld",
+    "uworld_qbank",
+  );
+  const behavioralRow = behavioralSample.parsedRows.find((row) => row.categoryType === "uworld_system");
+  if (!behavioralRow || behavioralRow.name !== "Behavioral Health" || (behavioralRow.roi ?? 0) <= 0) {
+    console.error(
+      "Behavioral Health aggregation fixture failed: expected Psychiatric/Behavioral row to map with non-zero ROI.",
+    );
     process.exitCode = 1;
   }
 

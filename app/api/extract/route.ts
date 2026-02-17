@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { computeOverallConfidence } from "../../lib/confidence";
+import { parseUworldQbankText } from "../../lib/parseUworldQbankText";
 import { getAllowedCategoryTypes } from "../../lib/blueprint";
 import { isTestType } from "../../lib/testSelection";
 import type { CategoryType, ExtractedRow, ExtractResponse, InputSource, TestType } from "../../lib/types";
@@ -180,6 +181,8 @@ export async function POST(request: Request) {
       exam === "usmle_step2" && inputSourceHint === "uworld_qbank"
         ? (["uworld_subject", "uworld_system"] satisfies CategoryType[])
         : getAllowedCategoryTypes(exam);
+    const deterministicUworldRows =
+      exam === "usmle_step2" && inputSourceHint === "uworld_qbank" ? parseUworldQbankText(rawText) : [];
     const model = process.env.OPENAI_MODEL ?? DEFAULT_MODEL;
     const completionResponse = await fetch(API_URL, {
       method: "POST",
@@ -264,7 +267,31 @@ export async function POST(request: Request) {
       return safeErrorResponse(500, "Extraction response was not valid JSON.");
     }
 
-    const rows = sanitizeRows(parsedContent.rows, allowedCategoryTypes);
+    const aiRows = sanitizeRows(parsedContent.rows, allowedCategoryTypes);
+    const rows = (() => {
+      if (deterministicUworldRows.length === 0) {
+        return aiRows;
+      }
+
+      const merged = new Map<string, ExtractedRow>();
+      const upsert = (row: ExtractedRow) => {
+        const key = `${row.categoryType}::${row.name.toLowerCase()}`;
+        const existing = merged.get(key);
+        const rowTotal = row.total ?? 0;
+        const existingTotal = existing?.total ?? 0;
+        if (!existing || rowTotal >= existingTotal) {
+          merged.set(key, row);
+        }
+      };
+
+      for (const row of aiRows) {
+        upsert(row);
+      }
+      for (const row of deterministicUworldRows) {
+        upsert(row);
+      }
+      return Array.from(merged.values());
+    })();
     const warnings = Array.isArray(parsedContent.warnings)
       ? parsedContent.warnings.filter((warning): warning is string => typeof warning === "string")
       : [];
