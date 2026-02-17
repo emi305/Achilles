@@ -150,3 +150,62 @@ body {
     left: 1rem;
   }
 }
+
+@media print {
+  @page {
+    margin: 0.5in;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    overflow: visible !important;
+  }
+
+  body * {
+    visibility: hidden;
+  }
+
+  #results-print-root,
+  #results-print-root * {
+    visibility: visible;
+  }
+
+  #results-print-root {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    font-size: 12pt;
+    color: #111;
+  }
+
+  .print-hide,
+  .greek-column,
+  .settings-link-wrap,
+  .settings-link-wrap-left {
+    display: none !important;
+  }
+
+  .print-avoid-break {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  #results-print-root .rounded-md,
+  #results-print-root .border {
+    box-shadow: none !important;
+  }
+
+  #results-print-root table {
+    width: 100%;
+  }
+
+  #results-print-root tr,
+  #results-print-root li {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+}

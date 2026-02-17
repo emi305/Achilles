@@ -453,7 +453,7 @@ function RankTable({
   showProiColumn: boolean;
 }) {
   return (
-    <Card title={title}>
+    <Card title={title} className="print-avoid-break">
       <div className="overflow-x-auto">
         <table className="min-w-full border-collapse text-sm">
           <thead>
@@ -729,6 +729,12 @@ export default function ResultsPage() {
     }
   };
 
+  const handleExportPdf = () => {
+    if (typeof window !== "undefined") {
+      window.print();
+    }
+  };
+
   if (parsedRows.length === 0) {
     return (
       <section className="space-y-8 pt-6 sm:pt-10">
@@ -751,11 +757,11 @@ export default function ResultsPage() {
   return (
     <section className="space-y-6 pt-6 sm:pt-10">
       <BrandHeader />
-
-      <Card>
+      <div id="results-print-root" className="space-y-6">
+      <Card className="print-avoid-break">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <h2 className="brand-title text-2xl font-semibold text-stone-900">RESULTS: {getTestLabel(selectedTest)}</h2>
-          <div className="flex flex-wrap items-center gap-2 md:justify-center">
+          <div className="print-hide flex flex-wrap items-center gap-2 md:justify-center">
             {(Object.keys(modeLabels) as RankingMode[]).map((mode) => (
               <button
                 key={mode}
@@ -771,6 +777,13 @@ export default function ResultsPage() {
                 {modeLabels[mode]}
               </button>
             ))}
+            <button
+              type="button"
+              onClick={handleExportPdf}
+              className="cursor-pointer rounded-md border border-stone-300 bg-white px-3 py-1.5 text-sm font-medium text-stone-700 hover:bg-stone-50"
+            >
+              Export PDF
+            </button>
           </div>
         </div>
 
@@ -800,7 +813,7 @@ export default function ResultsPage() {
         </Alert>
       ) : null}
 
-      <Card title="Achilles Insight">
+      <Card title="Achilles Insight" className="print-avoid-break">
         <ul className="space-y-4 text-sm text-stone-800">
           {topFive.map((row) => (
             <li key={`insight-${row.categoryType}-${row.name}`} className="rounded-md border border-stone-200 bg-stone-50/40 p-3">
@@ -817,7 +830,7 @@ export default function ResultsPage() {
         </ul>
       </Card>
 
-      <Card title="What to study?">
+      <Card title="What to study?" className="print-avoid-break">
         <ul className="space-y-4 text-sm text-stone-800">
           {topFive.map((row) => (
             <li key={`study-${row.categoryType}-${row.name}`} className="rounded-md border border-stone-200 bg-stone-50/40 p-3">
@@ -839,7 +852,7 @@ export default function ResultsPage() {
       </Card>
 
       {selectedTest === "usmle_step2" ? (
-        <Card>
+        <Card className="print-avoid-break">
           <div className="space-y-1 text-sm text-stone-700">
             {hasUworldQbankRows ? <p>QBank ROI (UWorld Subjects/Systems)</p> : null}
             {hasScoreReport ? <p>PROI (Score Report / NBME / Free120)</p> : null}
@@ -848,7 +861,7 @@ export default function ResultsPage() {
       ) : null}
 
       {selectedTest === "usmle_step2" && (big3Roi.hasData || big3Proi.hasData) ? (
-        <Card title="Big-3">
+        <Card title="Big-3" className="print-avoid-break">
           <p className="text-sm text-stone-700">
             Big-3 = your highest-impact study targets right now. ROI uses QBank performance; PROI uses score-report
             weakness. Both already combine how weak you are and how heavily the exam weights that area.
@@ -931,7 +944,7 @@ export default function ResultsPage() {
       ) : null}
 
       {unmappedGroups.length > 0 ? (
-        <Card title="Unmapped Categories">
+        <Card title="Unmapped Categories" className="print-avoid-break">
           <div className="overflow-x-auto">
             <table className="min-w-full border-collapse text-sm">
               <thead>
@@ -972,7 +985,7 @@ export default function ResultsPage() {
         </Card>
       ) : null}
 
-      <div className="flex justify-center">
+      <div className="print-hide flex justify-center">
         <button
           type="button"
           onClick={() => setShowRestOfData((prev) => !prev)}
@@ -982,7 +995,7 @@ export default function ResultsPage() {
         </button>
       </div>
 
-      <Card title="ZEUS" className="mx-auto w-full max-w-3xl">
+      <Card title="ZEUS" className="print-hide mx-auto w-full max-w-3xl">
         <p className="text-sm text-stone-600">Ask Zeus what to do next based on your data.</p>
         <div ref={chatScrollRef} className="max-h-72 space-y-3 overflow-y-auto rounded-md border border-stone-200 bg-stone-50/40 p-3">
           {chatMessages.map((message, index) => (
@@ -1029,19 +1042,19 @@ export default function ResultsPage() {
         {chatError ? <p className="text-sm text-red-700">{chatError}</p> : null}
       </Card>
 
-      {showRestOfData
-        ? sections.map((section) => (
-            <RankTable
-              key={section.key}
-              title={section.title}
-              rows={section.rows}
-              mode={rankingMode}
-              showProiColumn={showProiColumn}
-            />
-          ))
-        : null}
+      <div className={showRestOfData ? "space-y-6" : "hidden print:block print:space-y-6"}>
+        {sections.map((section) => (
+          <RankTable
+            key={section.key}
+            title={section.title}
+            rows={section.rows}
+            mode={rankingMode}
+            showProiColumn={showProiColumn}
+          />
+        ))}
+      </div>
 
-      <div className="pt-2">
+      <div className="print-hide pt-2">
         <button
           type="button"
           onClick={() => {
@@ -1052,6 +1065,7 @@ export default function ResultsPage() {
         >
           Start over
         </button>
+      </div>
       </div>
     </section>
   );
