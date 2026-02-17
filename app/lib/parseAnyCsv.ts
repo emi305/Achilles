@@ -113,7 +113,9 @@ function parseAchillesSimple(lines: string[], testType: TestType, source: QbankS
       categoryTypeRaw !== "clinical_presentation" &&
       categoryTypeRaw !== "discipline" &&
       categoryTypeRaw !== "system" &&
-      categoryTypeRaw !== "physician_task"
+      categoryTypeRaw !== "physician_task" &&
+      categoryTypeRaw !== "uworld_subject" &&
+      categoryTypeRaw !== "uworld_system"
     ) {
       throw new Error(
         `Invalid categoryType on line ${lineNumber}.`,
@@ -184,6 +186,45 @@ function parsePercentCorrectTemplate(
   return parsedRows;
 }
 
+function parseUworldPerformance(
+  lines: string[],
+  categoryType: "uworld_subject" | "uworld_system",
+  testType: TestType,
+  source: QbankSource,
+): ParsedRow[] {
+  const parsedRows: ParsedRow[] = [];
+
+  for (let index = 1; index < lines.length; index += 1) {
+    const lineNumber = index + 1;
+    const parts = splitCsvLine(lines[index]);
+
+    if (parts.length === 4) {
+      const nameRaw = parts[0] ?? "";
+      const correctRaw = parts[1] ?? "";
+      const totalRaw = parts[3] ?? "";
+      const correct = parseInteger(correctRaw, "correct", lineNumber);
+      const total = parseInteger(totalRaw, "total", lineNumber);
+      parsedRows.push(buildRow(categoryType, nameRaw, correct, total, lineNumber, testType, source));
+      continue;
+    }
+
+    if (parts.length === 3) {
+      const nameRaw = parts[0] ?? "";
+      const percentCorrectRaw = parts[1] ?? "";
+      const totalRaw = parts[2] ?? "";
+      const percentCorrect = parsePercentCorrect(percentCorrectRaw, lineNumber);
+      const total = parseInteger(totalRaw, "total", lineNumber);
+      const correct = Math.round(percentCorrect * total);
+      parsedRows.push(buildRow(categoryType, nameRaw, correct, total, lineNumber, testType, source));
+      continue;
+    }
+
+    throw new Error(`Invalid UWorld CSV row on line ${lineNumber}. Expected 3 or 4 columns.`);
+  }
+
+  return parsedRows;
+}
+
 export function parseAnyCsv(csvText: string, opts: ParseAnyOptions): ParsedRow[] {
   const lines = parseLines(csvText);
   const headerParts = splitCsvLine(lines[0]).map((cell) => cell.trim());
@@ -206,6 +247,16 @@ export function parseAnyCsv(csvText: string, opts: ParseAnyOptions): ParsedRow[]
       throw new Error("Invalid CSV header. Expected: categoryType,name,correct,total");
     }
     parsedRows = parseAchillesSimple(lines, testType, source);
+  } else if (templateId === "uworld_subject_performance") {
+    if (testType !== "usmle_step2") {
+      throw new Error("UWorld Step 2 templates are only valid in USMLE Step 2 mode.");
+    }
+    parsedRows = parseUworldPerformance(lines, "uworld_subject", testType, source);
+  } else if (templateId === "uworld_system_performance") {
+    if (testType !== "usmle_step2") {
+      throw new Error("UWorld Step 2 templates are only valid in USMLE Step 2 mode.");
+    }
+    parsedRows = parseUworldPerformance(lines, "uworld_system", testType, source);
   } else if (templateId === "category_performance") {
     const expected = ["Category", "Correct", "Incorrect", "Total"];
     const isMatch = expected.every((value, index) => headerParts[index]?.toLowerCase() === value.toLowerCase());

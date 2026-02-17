@@ -360,11 +360,13 @@ export default function ResultsPage() {
 
   const sections = useMemo<TableSection[]>(() => {
     const generalRows = sortDisplayRows(aggregated, rankingMode);
-    const categorySections = categoryOrder.map((categoryType) => ({
-      key: categoryType,
-      title: `${CATEGORY_LABEL_BY_TYPE[categoryType]} Rank List`,
-      rows: sortDisplayRows(getSectionRows(generalRows, categoryType), rankingMode),
-    }));
+    const categorySections = categoryOrder
+      .map((categoryType) => ({
+        key: categoryType,
+        title: `${CATEGORY_LABEL_BY_TYPE[categoryType]} Rank List`,
+        rows: sortDisplayRows(getSectionRows(generalRows, categoryType), rankingMode),
+      }))
+      .filter((section) => section.rows.length > 0);
 
     return [
       {

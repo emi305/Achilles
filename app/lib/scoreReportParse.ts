@@ -1,4 +1,4 @@
-import { getAllowedCategoryTypes, getWeightForCategory } from "./blueprint";
+import { getWeightForCategory } from "./blueprint";
 import { canonicalizeCategoryName, recoverCategoryTypeForComlex2 } from "./nameMatching";
 import { normalizeRowForMapping } from "./normalizeRowForMapping";
 import { sanitizeCategoryLabel } from "./textSanitize";
@@ -27,7 +27,10 @@ function normalizeCategoryTypeToken(value: string): string {
 
 function coerceCategoryType(value: string, testType: TestType): CategoryType | null {
   const token = normalizeCategoryTypeToken(value);
-  const allowed = new Set(getAllowedCategoryTypes(testType));
+  const allowed =
+    testType === "usmle_step2"
+      ? new Set<CategoryType>(["discipline", "system", "physician_task"])
+      : new Set<CategoryType>(["discipline", "competency_domain", "clinical_presentation"]);
 
   if (allowed.has(token as CategoryType)) {
     return token as CategoryType;

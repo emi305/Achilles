@@ -5,7 +5,9 @@ export type CategoryType =
   | "clinical_presentation"
   | "discipline"
   | "system"
-  | "physician_task";
+  | "physician_task"
+  | "uworld_subject"
+  | "uworld_system";
 
 export type ParsedRow = {
   testType?: TestType;

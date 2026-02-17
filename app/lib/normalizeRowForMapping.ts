@@ -8,6 +8,8 @@ const KNOWN_CATEGORY_TYPES: CategoryType[] = [
   "discipline",
   "system",
   "physician_task",
+  "uworld_subject",
+  "uworld_system",
 ];
 
 function isCategoryType(value: string): value is CategoryType {

@@ -330,5 +330,54 @@ export const MAPPING_CATALOG: {
         aliases: ["prevention", "health maintenance", "screening", "counseling"],
       },
     },
+    uworld_subject: {
+      Medicine: {
+        aliases: ["medicine", "internal medicine", "im"],
+      },
+      "Obstetrics & Gynecology": {
+        aliases: ["obstetrics and gynecology", "ob gyn", "ob/gyn", "obgyn"],
+      },
+      Pediatrics: {
+        aliases: ["pediatrics", "peds"],
+      },
+      Psychiatry: {
+        aliases: ["psychiatry", "psych"],
+      },
+      Surgery: {
+        aliases: ["surgery", "surg"],
+      },
+    },
+    uworld_system: {
+      "Allergy & Immunology": { aliases: ["allergy and immunology", "allergy & immunology"] },
+      "Biostatistics & Epidemiology": { aliases: ["biostats & epidemiology", "biostatistics and epidemiology"] },
+      "Cardiovascular System": { aliases: ["cardiovascular", "cardio"] },
+      Dermatology: { aliases: ["dermatology", "derm"] },
+      "Ear, Nose & Throat (ENT)": { aliases: ["ear nose and throat", "ent"] },
+      "Endocrine, Diabetes & Metabolism": { aliases: ["endocrine diabetes and metabolism"] },
+      "Female Reproductive System & Breast": { aliases: ["female reproductive system and breast"] },
+      "Gastrointestinal & Nutrition": { aliases: ["gastrointestinal and nutrition", "gi and nutrition"] },
+      "General Principles": { aliases: ["general principles"] },
+      "Hematology & Oncology": { aliases: ["hematology and oncology", "heme onc"] },
+      "Infectious Diseases": { aliases: ["infectious disease", "infectious diseases"] },
+      "Male Reproductive System": { aliases: ["male reproductive system"] },
+      "Miscellaneous (Multisystem)": { aliases: ["miscellaneous multisystem", "multisystem"] },
+      "Nervous System": { aliases: ["nervous system", "neuro"] },
+      Ophthalmology: { aliases: ["ophthalmology", "ophtho"] },
+      "Poisoning & Environmental Exposure": { aliases: ["poisoning and environmental exposure"] },
+      "Pregnancy, Childbirth & Puerperium": { aliases: ["pregnancy childbirth and puerperium"] },
+      "Psychiatric/Behavioral & Substance Use Disorder": {
+        aliases: ["psychiatric behavioral and substance use disorder", "behavioral and substance use disorder"],
+      },
+      "Pulmonary & Critical Care": { aliases: ["pulmonary and critical care", "pulm critical care"] },
+      "Renal, Urinary Systems & Electrolytes": {
+        aliases: ["renal urinary systems and electrolytes", "renal urinary and electrolytes"],
+      },
+      "Rheumatology/Orthopedics & Sports": {
+        aliases: ["rheumatology orthopedics and sports", "rheumatology orthopedics sports"],
+      },
+      "Social Sciences (Ethics/Legal/Professional)": {
+        aliases: ["social sciences", "social science", "ethics legal professional"],
+      },
+    },
   },
 };

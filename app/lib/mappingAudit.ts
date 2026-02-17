@@ -3,6 +3,7 @@ import { getWeightForCategory } from "./blueprint";
 import { COMLEX_COMPETENCY_DOMAIN_CANONICAL } from "./comlexCanonicalNames";
 import { COMPETENCY_DOMAIN_WEIGHTS } from "./comlexWeights";
 import { normalizeRowForMapping } from "./normalizeRowForMapping";
+import { USMLE2_UWORLD_SUBJECTS, USMLE2_UWORLD_SYSTEMS } from "./usmleStep2UworldCatalog";
 import type { QbankSource } from "./mappingCatalog";
 import type { CategoryType, TestType } from "./types";
 
@@ -217,6 +218,10 @@ const SAMPLE_INPUTS: MappingAuditInput[] = [
   { testType: "usmle_step2", categoryType: "physician_task", rawName: "Management", source: "amboss" },
   { testType: "usmle_step2", categoryType: "physician_task", rawName: "Diagnosis", source: "amboss" },
   { testType: "usmle_step2", categoryType: "physician_task", rawName: "Prevention", source: "amboss" },
+  { testType: "usmle_step2", categoryType: "uworld_subject", rawName: "Obstetrics and Gynecology", source: "uworld" },
+  { testType: "usmle_step2", categoryType: "uworld_system", rawName: "ENT", source: "uworld" },
+  { testType: "usmle_step2", categoryType: "uworld_system", rawName: "Social Sciences", source: "uworld" },
+  { testType: "usmle_step2", categoryType: "uworld_system", rawName: "Biostats & Epidemiology", source: "uworld" },
 ];
 
 if (process.argv.includes("--run")) {
@@ -344,6 +349,62 @@ if (process.argv.includes("--run")) {
     console.error(
       `COMLEX competency weights must sum to 1.0 (100%). Found ${comlexCompetencyWeightSum.toFixed(6)}.`,
     );
+    process.exitCode = 1;
+  }
+
+  const failedUworldSubjects = USMLE2_UWORLD_SUBJECTS.filter((label) => {
+    const result = canonicalizeCategoryName("uworld_subject", label, "usmle_step2", "uworld");
+    if (!result.canonicalName) {
+      return true;
+    }
+    return getWeightForCategory("uworld_subject", result.canonicalName, "usmle_step2") == null;
+  });
+  const failedUworldSystems = USMLE2_UWORLD_SYSTEMS.filter((label) => {
+    const result = canonicalizeCategoryName("uworld_system", label, "usmle_step2", "uworld");
+    if (!result.canonicalName) {
+      return true;
+    }
+    return getWeightForCategory("uworld_system", result.canonicalName, "usmle_step2") == null;
+  });
+
+  const uworldVariantChecks: Array<{
+    raw: string;
+    type: "uworld_subject" | "uworld_system";
+    expected: string;
+  }> = [
+    { raw: "Obstetrics and Gynecology", type: "uworld_subject", expected: "Obstetrics & Gynecology" },
+    { raw: "ENT", type: "uworld_system", expected: "Ear, Nose & Throat (ENT)" },
+    {
+      raw: "Social Sciences",
+      type: "uworld_system",
+      expected: "Social Sciences (Ethics/Legal/Professional)",
+    },
+    { raw: "Biostats & Epidemiology", type: "uworld_system", expected: "Biostatistics & Epidemiology" },
+  ];
+  const failedUworldVariants = uworldVariantChecks.filter((check) => {
+    const result = canonicalizeCategoryName(check.type, check.raw, "usmle_step2", "uworld");
+    return result.canonicalName !== check.expected;
+  });
+
+  if (failedUworldSubjects.length > 0) {
+    console.error("USMLE Step 2 UWorld subject coverage failed:");
+    for (const failed of failedUworldSubjects) {
+      console.error(`- ${failed}`);
+    }
+    process.exitCode = 1;
+  }
+  if (failedUworldSystems.length > 0) {
+    console.error("USMLE Step 2 UWorld system coverage failed:");
+    for (const failed of failedUworldSystems) {
+      console.error(`- ${failed}`);
+    }
+    process.exitCode = 1;
+  }
+  if (failedUworldVariants.length > 0) {
+    console.error("USMLE Step 2 UWorld variant canonicalization failed:");
+    for (const failed of failedUworldVariants) {
+      console.error(`- ${failed.type}: "${failed.raw}" expected "${failed.expected}"`);
+    }
     process.exitCode = 1;
   }
 

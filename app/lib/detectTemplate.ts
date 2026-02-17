@@ -13,6 +13,22 @@ function matchesHeader(headers: string[], expected: string[]) {
 }
 
 export function detectTemplate(headers: string[]): TemplateId | null {
+  if (matchesHeader(headers, ["Subject", "Correct", "Incorrect", "Total"])) {
+    return "uworld_subject_performance";
+  }
+
+  if (matchesHeader(headers, ["System", "Correct", "Incorrect", "Total"])) {
+    return "uworld_system_performance";
+  }
+
+  if (matchesHeader(headers, ["Subject", "PercentCorrect", "Total"])) {
+    return "uworld_subject_performance";
+  }
+
+  if (matchesHeader(headers, ["System", "PercentCorrect", "Total"])) {
+    return "uworld_system_performance";
+  }
+
   if (matchesHeader(headers, ["categoryType", "name", "correct", "total"])) {
     return "achilles_simple";
   }

@@ -11,7 +11,9 @@ function isCategoryType(value: string): value is CategoryType {
     value === "clinical_presentation" ||
     value === "discipline" ||
     value === "system" ||
-    value === "physician_task"
+    value === "physician_task" ||
+    value === "uworld_subject" ||
+    value === "uworld_system"
   );
 }
 

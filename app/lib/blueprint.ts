@@ -7,11 +7,19 @@ import {
   STEP2_DISCIPLINE_WEIGHTS,
   STEP2_PHYSICIAN_TASK_WEIGHTS,
   STEP2_SYSTEM_WEIGHTS,
+  STEP2_UWORLD_SUBJECT_WEIGHTS,
+  STEP2_UWORLD_SYSTEM_WEIGHTS,
 } from "./step2Weights";
 import type { CategoryType, TestType } from "./types";
 
 const COMLEX_CATEGORY_ORDER: CategoryType[] = ["discipline", "competency_domain", "clinical_presentation"];
-const STEP2_CATEGORY_ORDER: CategoryType[] = ["discipline", "system", "physician_task"];
+const STEP2_CATEGORY_ORDER: CategoryType[] = [
+  "uworld_subject",
+  "uworld_system",
+  "discipline",
+  "system",
+  "physician_task",
+];
 
 export const CATEGORY_ORDER_BY_TEST: Record<TestType, CategoryType[]> = {
   comlex2: COMLEX_CATEGORY_ORDER,
@@ -24,6 +32,8 @@ export const CATEGORY_LABEL_BY_TYPE: Record<CategoryType, string> = {
   clinical_presentation: "Clinical Presentation",
   system: "Systems",
   physician_task: "Physician Tasks",
+  uworld_subject: "UWorld Subject",
+  uworld_system: "UWorld System",
 };
 
 export const EXAM_LABEL: Record<TestType, string> = {
@@ -53,6 +63,12 @@ function getStep2Weights(categoryType: CategoryType): Record<string, number> {
   }
   if (categoryType === "physician_task") {
     return STEP2_PHYSICIAN_TASK_WEIGHTS;
+  }
+  if (categoryType === "uworld_subject") {
+    return STEP2_UWORLD_SUBJECT_WEIGHTS;
+  }
+  if (categoryType === "uworld_system") {
+    return STEP2_UWORLD_SYSTEM_WEIGHTS;
   }
   return {};
 }

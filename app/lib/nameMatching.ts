@@ -25,6 +25,8 @@ const KNOWN_CATEGORY_TYPES: CategoryType[] = [
   "discipline",
   "system",
   "physician_task",
+  "uworld_subject",
+  "uworld_system",
 ];
 
 function isCategoryType(value: string): value is CategoryType {
@@ -198,6 +200,31 @@ function tryAliasMatch(
   return null;
 }
 
+function maybeLogUworldCanonicalization(
+  testType: TestType,
+  categoryType: string,
+  rawName: string,
+  canonicalName: string | null,
+) {
+  if (process.env.NODE_ENV === "production") {
+    return;
+  }
+  if (testType !== "usmle_step2") {
+    return;
+  }
+  if (categoryType !== "uworld_subject" && categoryType !== "uworld_system") {
+    return;
+  }
+  if (!canonicalName) {
+    return;
+  }
+  const rawSanitized = sanitizeCategoryLabel(rawName);
+  const canonicalSanitized = sanitizeCategoryLabel(canonicalName);
+  if (rawSanitized !== canonicalSanitized) {
+    console.log(`[uworldCanon] usmle2 ${categoryType} "${rawName}" -> "${canonicalName}"`);
+  }
+}
+
 export function canonicalizeCategoryName(
   categoryType: CategoryType | string,
   rawName: string,
@@ -231,18 +258,21 @@ export function canonicalizeCategoryName(
 
   for (const entry of preparedCatalog) {
     if (normalizedCandidates.includes(entry.canonicalSanitized)) {
+      maybeLogUworldCanonicalization(testType, recoveredType, rawName, entry.canonicalName);
       return { canonicalName: entry.canonicalName, matchType: "exact", matchScore: 1 };
     }
   }
 
   const aliasMatch = tryAliasMatch(preparedCatalog, normalizedCandidates, source);
   if (aliasMatch) {
+    maybeLogUworldCanonicalization(testType, recoveredType, rawName, aliasMatch.canonicalName);
     return aliasMatch;
   }
 
   for (const candidate of normalizedCandidates) {
     const regexMatch = tryRegexMatch(preparedCatalog, candidate);
     if (regexMatch) {
+      maybeLogUworldCanonicalization(testType, recoveredType, rawName, regexMatch.canonicalName);
       return regexMatch;
     }
   }
@@ -266,6 +296,7 @@ export function canonicalizeCategoryName(
   }
 
   if (bestName && bestScore >= MATCH_THRESHOLD) {
+    maybeLogUworldCanonicalization(testType, recoveredType, rawName, bestName);
     return { canonicalName: bestName, matchType: "fuzzy", matchScore: bestScore };
   }
 
