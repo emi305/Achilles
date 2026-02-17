@@ -85,13 +85,16 @@ export function parseCsv(csvText: string, testType: TestType): ParsedRow[] {
 
   for (let index = 1; index < lines.length; index += 1) {
     const lineNumber = index + 1;
-    const parts = splitCsvLine(lines[index]).map((cell) => cell.trim());
+    const parts = splitCsvLine(lines[index]);
 
     if (parts.length !== 4) {
       throw new Error(`Invalid CSV row on line ${lineNumber}. Expected 4 columns.`);
     }
 
-    const [categoryTypeRaw, nameRaw, correctRaw, totalRaw] = parts;
+    const categoryTypeRaw = parts[0]?.trim() ?? "";
+    const nameRaw = parts[1] ?? "";
+    const correctRaw = parts[2] ?? "";
+    const totalRaw = parts[3] ?? "";
 
     if (!isCategoryType(categoryTypeRaw)) {
       throw new Error(
@@ -99,7 +102,7 @@ export function parseCsv(csvText: string, testType: TestType): ParsedRow[] {
       );
     }
 
-    if (!nameRaw) {
+    if (!nameRaw.trim()) {
       throw new Error(`Missing name on line ${lineNumber}.`);
     }
 

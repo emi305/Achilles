@@ -10,6 +10,7 @@ import { normalizeExtractRows, normalizeExtractedRow } from "../lib/normalizeExt
 import { parseAnyCsv } from "../lib/parseAnyCsv";
 import { clearReviewSession, setReviewSession } from "../lib/reviewSession";
 import { mergeScoreReportProxyRows, type ScoreReportProxyRow } from "../lib/scoreReportParse";
+import { normalizeRowForMapping } from "../lib/normalizeRowForMapping";
 import { setUploadSession } from "../lib/session";
 import {
   getSelectedTestFromLocalStorage,
@@ -349,10 +350,12 @@ export default function UploadPage() {
         ...row,
         testType: selectedTest,
       }));
-      const mergedRows = mergeScoreReportProxyRows(examRows, scoreReportProxyRows, selectedTest).map((row) => ({
-        ...row,
-        testType: selectedTest,
-      }));
+      const mergedRows = mergeScoreReportProxyRows(examRows, scoreReportProxyRows, selectedTest).map((row) =>
+        normalizeRowForMapping(selectedTest, {
+          ...row,
+          testType: selectedTest,
+        }),
+      );
       if (process.env.NODE_ENV === "development") {
         console.log(
           "[Analyze][debug] first parsed rows:",

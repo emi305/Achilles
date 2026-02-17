@@ -1,4 +1,5 @@
 import type { CategoryType, TestType } from "./types";
+import { COMLEX_COMPETENCY_DOMAIN_CANONICAL } from "./comlexCanonicalNames";
 
 export type QbankSource = "truelearn" | "uworld" | "amboss" | "unknown";
 
@@ -9,6 +10,16 @@ type CanonicalEntry = {
 };
 
 type CategoryCatalog = Partial<Record<string, CanonicalEntry>>;
+
+const [
+  COMLEX_CD_OPP,
+  COMLEX_CD_PATIENT_CARE,
+  COMLEX_CD_APP_KNOWLEDGE,
+  COMLEX_CD_PBLI,
+  COMLEX_CD_ICS,
+  COMLEX_CD_PROFESSIONALISM,
+  COMLEX_CD_SBP,
+] = COMLEX_COMPETENCY_DOMAIN_CANONICAL;
 
 export const MAPPING_CATALOG: {
   [testType in TestType]: {
@@ -50,7 +61,7 @@ export const MAPPING_CATALOG: {
       },
     },
     competency_domain: {
-      "Osteopathic Principles, Practice, and Manipulative Treatment": {
+      [COMLEX_CD_OPP]: {
         aliases: [
           "opp",
           "omm",
@@ -65,15 +76,16 @@ export const MAPPING_CATALOG: {
           truelearn: ["opp", "omm/omt"],
         },
       },
-      "Osteopathic Patient Care and Procedural Skills": {
+      [COMLEX_CD_PATIENT_CARE]: {
         aliases: [
+          "osteopathic patient care and procedural skills",
           "patient care procedural skills",
           "procedural skills",
           "osteopathic patient care",
           "osteopathic patient care and procedural skills",
         ],
       },
-      "Application of Knowledge for Osteopathic Medical Practice": {
+      [COMLEX_CD_APP_KNOWLEDGE]: {
         aliases: [
           "application of knowledge",
           "medical knowledge",
@@ -81,8 +93,11 @@ export const MAPPING_CATALOG: {
           "application of knowledge for osteopathic medical practice",
         ],
       },
-      "Practice-Based Learning and Improvement in Osteopathic Medical Practice": {
+      [COMLEX_CD_PBLI]: {
         aliases: [
+          "practice-based learning and improvement in osteopathic medical practice",
+          "practice–based learning and improvement in osteopathic medical practice",
+          "practice—based learning and improvement in osteopathic medical practice",
           "practice based learning",
           "practice based learning improvement",
           "practice based learning and improvement in osteopathic medical practice",
@@ -92,7 +107,7 @@ export const MAPPING_CATALOG: {
           "pbli",
         ],
       },
-      "Interpersonal and Communication Skills in the Practice of Osteopathic Medicine": {
+      [COMLEX_CD_ICS]: {
         aliases: [
           "communication",
           "interpersonal skills",
@@ -103,14 +118,14 @@ export const MAPPING_CATALOG: {
           "interpersonal communication skills in the practice of osteopathic medicine",
         ],
       },
-      "Professionalism in the Practice of Osteopathic Medicine": {
+      [COMLEX_CD_PROFESSIONALISM]: {
         aliases: [
           "professionalism",
           "professionalism in the practice of osteopathic medicine",
           "professionalism in osteopathic medicine",
         ],
       },
-      "Systems-Based Practice in Osteopathic Medicine": {
+      [COMLEX_CD_SBP]: {
         aliases: [
           "systems based practice",
           "systems-based practice",
@@ -134,6 +149,9 @@ export const MAPPING_CATALOG: {
       },
       "Patient Presentations Related to Human Development, Reproduction, and Sexuality": {
         aliases: [
+          "human development, reproduction, and sexuality",
+          "human development reproduction and sexuality",
+          "human development, reproduction and sexuality",
           "patient presentations related to human development reproduction and sexuality",
           "patient presentations related to human development reproduction sexuality",
           "human development reproduction and sexuality",

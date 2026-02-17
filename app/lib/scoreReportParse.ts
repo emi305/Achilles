@@ -1,5 +1,7 @@
 import { getAllowedCategoryTypes, getWeightForCategory } from "./blueprint";
-import { canonicalizeCategoryName } from "./nameMatching";
+import { canonicalizeCategoryName, recoverCategoryTypeForComlex2 } from "./nameMatching";
+import { normalizeRowForMapping } from "./normalizeRowForMapping";
+import { sanitizeCategoryLabel } from "./textSanitize";
 import type { CategoryType, ParsedRow, TestType } from "./types";
 
 const API_URL = "https://api.openai.com/v1/chat/completions";
@@ -86,15 +88,26 @@ function parseScoreReportRows(content: string, testType: TestType): ScoreReportP
   const normalized: ScoreReportProxyRow[] = [];
   for (const row of rows) {
     const categoryTypeRaw = typeof row.categoryType === "string" ? row.categoryType : "";
-    const categoryType = coerceCategoryType(categoryTypeRaw, testType);
-    const name = typeof row.name === "string" ? row.name.trim() : "";
+    const name = typeof row.name === "string" ? row.name : "";
+    const recoveredTypeRaw = recoverCategoryTypeForComlex2(testType, categoryTypeRaw, name);
+    const categoryType = coerceCategoryType(recoveredTypeRaw, testType);
     const proxyWeakness = typeof row.proxyWeakness === "number" ? clamp01(row.proxyWeakness) : undefined;
 
-    if (categoryType && name && typeof proxyWeakness === "number") {
-      normalized.push({
+    if (categoryType && sanitizeCategoryLabel(name) && typeof proxyWeakness === "number") {
+      const normalizedRow = normalizeRowForMapping(testType, {
+        testType,
+        source: "unknown",
         categoryType,
         name,
+        originalName: name,
         proxyWeakness,
+        weight: null,
+        roi: 0,
+      });
+      normalized.push({
+        categoryType: normalizedRow.categoryType,
+        name: normalizedRow.name,
+        proxyWeakness: typeof normalizedRow.proxyWeakness === "number" ? normalizedRow.proxyWeakness : proxyWeakness,
       });
     }
   }

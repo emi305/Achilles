@@ -1,5 +1,6 @@
 import type { ParsedRow, TestType } from "./types";
 import { DEFAULT_TEST_TYPE, isTestType } from "./testSelection";
+import { normalizeRowForMapping } from "./normalizeRowForMapping";
 
 export type UploadSessionData = {
   selectedTest: TestType;
@@ -9,8 +10,15 @@ export type UploadSessionData = {
   savedAt: string;
 };
 
+type UploadSessionStored = {
+  schemaVersion: number;
+  savedAt: string;
+  payload: UploadSessionData;
+};
+
 const STORAGE_KEY = "achilles-upload-session";
 const UPLOAD_SESSION_CHANGED_EVENT = "upload-session-changed";
+const UPLOAD_SESSION_SCHEMA_VERSION = 2;
 const EMPTY_ROWS: ParsedRow[] = [];
 
 let cachedRows: ParsedRow[] = EMPTY_ROWS;
@@ -28,21 +36,66 @@ function emitChange() {
   }
 }
 
-function parseRowsFromRaw(raw: string | null): ParsedRow[] {
-  if (!raw) {
-    return EMPTY_ROWS;
+function normalizeSessionPayload(payload: Partial<UploadSessionData>): UploadSessionData | null {
+  const selectedTest = isTestType(payload.selectedTest) ? payload.selectedTest : DEFAULT_TEST_TYPE;
+  const parsedRows = Array.isArray(payload.parsedRows)
+    ? payload.parsedRows.map((row) =>
+        normalizeRowForMapping(selectedTest, {
+          ...row,
+          testType: row.testType ?? selectedTest,
+        }),
+      )
+    : [];
+
+  if (parsedRows.length === 0) {
+    return null;
   }
 
+  return {
+    selectedTest,
+    scoreReportProvided: typeof payload.scoreReportProvided === "boolean" ? payload.scoreReportProvided : undefined,
+    pastedCsv: typeof payload.pastedCsv === "string" ? payload.pastedCsv : "",
+    parsedRows,
+    savedAt: typeof payload.savedAt === "string" ? payload.savedAt : new Date().toISOString(),
+  };
+}
+
+function serializeStoredSession(data: UploadSessionData): string {
+  const wrapped: UploadSessionStored = {
+    schemaVersion: UPLOAD_SESSION_SCHEMA_VERSION,
+    savedAt: data.savedAt,
+    payload: data,
+  };
+  return JSON.stringify(wrapped);
+}
+
+function parseSessionRaw(raw: string | null): { data: UploadSessionData | null; normalizedRaw: string | null } {
+  if (!raw) {
+    return { data: null, normalizedRaw: null };
+  }
+
+  const parsed = JSON.parse(raw) as Partial<UploadSessionData> | Partial<UploadSessionStored>;
+  const isWrapped =
+    !!parsed &&
+    typeof parsed === "object" &&
+    "payload" in parsed &&
+    (parsed as Partial<UploadSessionStored>).payload !== undefined;
+  const payload = isWrapped
+    ? ((parsed as Partial<UploadSessionStored>).payload as Partial<UploadSessionData>)
+    : (parsed as Partial<UploadSessionData>);
+
+  const normalized = normalizeSessionPayload(payload);
+  if (!normalized) {
+    return { data: null, normalizedRaw: null };
+  }
+
+  return { data: normalized, normalizedRaw: serializeStoredSession(normalized) };
+}
+
+function parseRowsFromRaw(raw: string | null): ParsedRow[] {
   try {
-    const parsed = JSON.parse(raw) as Partial<UploadSessionData>;
-    if (!Array.isArray(parsed?.parsedRows) || parsed.parsedRows.length === 0) {
-      return EMPTY_ROWS;
-    }
-    const selectedTest = isTestType(parsed.selectedTest) ? parsed.selectedTest : DEFAULT_TEST_TYPE;
-    return parsed.parsedRows.map((row) => ({
-      ...row,
-      testType: row.testType ?? selectedTest,
-    }));
+    const parsed = parseSessionRaw(raw);
+    return parsed.data?.parsedRows ?? EMPTY_ROWS;
   } catch {
     if (canUseSessionStorage()) {
       window.sessionStorage.removeItem(STORAGE_KEY);
@@ -67,7 +120,21 @@ function hydrateFromSessionStorageIfNeeded() {
   }
 
   const raw = window.sessionStorage.getItem(STORAGE_KEY);
-  setCachedFromRaw(raw);
+  let rawForCache = raw;
+  try {
+    const parsed = parseSessionRaw(raw);
+    if (raw && parsed.normalizedRaw && parsed.normalizedRaw !== raw) {
+      window.sessionStorage.setItem(STORAGE_KEY, parsed.normalizedRaw);
+      rawForCache = parsed.normalizedRaw;
+    } else if (raw && !parsed.data) {
+      window.sessionStorage.removeItem(STORAGE_KEY);
+      rawForCache = null;
+    }
+  } catch {
+    window.sessionStorage.removeItem(STORAGE_KEY);
+    rawForCache = null;
+  }
+  setCachedFromRaw(rawForCache);
 }
 
 function ensureWindowSubscriptions() {
@@ -129,23 +196,15 @@ export function getUploadSession(): UploadSessionData | null {
   }
 
   try {
-    const parsed = JSON.parse(raw) as Partial<UploadSessionData>;
-    const selectedTest = isTestType(parsed.selectedTest) ? parsed.selectedTest : DEFAULT_TEST_TYPE;
-    const parsedRows = Array.isArray(parsed.parsedRows)
-      ? parsed.parsedRows.map((row) => ({ ...row, testType: row.testType ?? selectedTest }))
-      : [];
-
-    if (parsedRows.length === 0) {
+    const parsed = parseSessionRaw(raw);
+    if (!parsed.data) {
       return null;
     }
-
-    return {
-      selectedTest,
-      scoreReportProvided: typeof parsed.scoreReportProvided === "boolean" ? parsed.scoreReportProvided : undefined,
-      pastedCsv: typeof parsed.pastedCsv === "string" ? parsed.pastedCsv : "",
-      parsedRows,
-      savedAt: typeof parsed.savedAt === "string" ? parsed.savedAt : new Date().toISOString(),
-    };
+    if (parsed.normalizedRaw && parsed.normalizedRaw !== raw) {
+      window.sessionStorage.setItem(STORAGE_KEY, parsed.normalizedRaw);
+      setCachedFromRaw(parsed.normalizedRaw);
+    }
+    return parsed.data;
   } catch {
     window.sessionStorage.removeItem(STORAGE_KEY);
     return null;
@@ -157,7 +216,12 @@ export function setUploadSession(data: UploadSessionData) {
     return;
   }
 
-  const raw = JSON.stringify(data);
+  const normalizedPayload = normalizeSessionPayload(data);
+  if (!normalizedPayload) {
+    clearUploadSession();
+    return;
+  }
+  const raw = serializeStoredSession(normalizedPayload);
   window.sessionStorage.setItem(STORAGE_KEY, raw);
   setCachedFromRaw(raw);
   window.dispatchEvent(new Event(UPLOAD_SESSION_CHANGED_EVENT));

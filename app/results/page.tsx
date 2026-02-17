@@ -665,7 +665,20 @@ export default function ResultsPage() {
               <tbody>
                 {unmappedGroups.map((group) => (
                   <tr key={`${group.originalName}-${group.categoryType}-${group.source}`} className="border-b border-stone-100 last:border-0">
-                    <td className="px-3 py-2 text-stone-900">{group.originalName}</td>
+                    <td className="px-3 py-2 text-stone-900">
+                      <div>{group.originalName}</div>
+                      {process.env.NODE_ENV !== "production" ? (
+                        <details className="mt-1 text-xs text-stone-500">
+                          <summary className="cursor-pointer select-none">debug</summary>
+                          <pre className="whitespace-pre-wrap break-words">
+                            {`json: ${JSON.stringify(group.originalName)}\ncharCodes: ${Array.from(group.originalName)
+                              .slice(0, 40)
+                              .map((char) => char.charCodeAt(0))
+                              .join(",")}`}
+                          </pre>
+                        </details>
+                      ) : null}
+                    </td>
                     <td className="px-3 py-2 text-stone-700">{group.categoryType}</td>
                     <td className="px-3 py-2 text-stone-700">{group.source}</td>
                     <td className="px-3 py-2 text-stone-700">{group.count}</td>

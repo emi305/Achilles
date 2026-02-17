@@ -1,17 +1,21 @@
-import { canonicalizeCategoryName } from "./nameMatching";
+import { canonicalizeCategoryName, recoverCategoryTypeForComlex2 } from "./nameMatching";
 import { getWeightForCategory } from "./blueprint";
+import { COMLEX_COMPETENCY_DOMAIN_CANONICAL } from "./comlexCanonicalNames";
+import { COMPETENCY_DOMAIN_WEIGHTS } from "./comlexWeights";
+import { normalizeRowForMapping } from "./normalizeRowForMapping";
 import type { QbankSource } from "./mappingCatalog";
 import type { CategoryType, TestType } from "./types";
 
 export type MappingAuditInput = {
   testType: TestType;
-  categoryType: CategoryType;
+  categoryType: CategoryType | string;
   rawName: string;
   source?: QbankSource;
 };
 
 type MappingAuditOutput = {
   input: MappingAuditInput;
+  recoveredCategoryType: string;
   canonicalName: string | null;
   matchType: "exact" | "alias" | "regex" | "fuzzy" | "none";
   matchScore: number;
@@ -22,14 +26,20 @@ export function runMappingAudit(inputs: MappingAuditInput[]) {
   const unmapped: MappingAuditOutput[] = [];
 
   for (const input of inputs) {
+    const recoveredCategoryType = recoverCategoryTypeForComlex2(
+      input.testType,
+      String(input.categoryType),
+      input.rawName,
+    );
     const result = canonicalizeCategoryName(
-      input.categoryType,
+      recoveredCategoryType,
       input.rawName,
       input.testType,
       input.source ?? "unknown",
     );
     const output: MappingAuditOutput = {
       input,
+      recoveredCategoryType,
       canonicalName: result.canonicalName,
       matchType: result.matchType,
       matchScore: result.matchScore,
@@ -71,8 +81,38 @@ const SAMPLE_INPUTS: MappingAuditInput[] = [
   },
   {
     testType: "comlex2",
+    categoryType: "competency_domain_unknown1",
+    rawName: "Osteopathic Principles, Practice, and Manipulative Treatment",
+    source: "unknown",
+  },
+  {
+    testType: "comlex2",
     categoryType: "competency_domain",
     rawName: "Osteopathic Patient Care and Procedural Skills",
+    source: "unknown",
+  },
+  {
+    testType: "comlex2",
+    categoryType: "competency_domain_unknown1",
+    rawName: "Osteopathic Patient Care and Procedural Skills",
+    source: "unknown",
+  },
+  {
+    testType: "comlex2",
+    categoryType: "competency_domain",
+    rawName: "Osteopathic\u00A0Patient Care and Procedural Skills",
+    source: "unknown",
+  },
+  {
+    testType: "comlex2",
+    categoryType: "clinical_presentation",
+    rawName: "Human Development, Reproduction, and Sexuality",
+    source: "unknown",
+  },
+  {
+    testType: "comlex2",
+    categoryType: "clinical_presentation",
+    rawName: "Human Development,\u200B Reproduction, and Sexuality",
     source: "unknown",
   },
   {
@@ -85,6 +125,12 @@ const SAMPLE_INPUTS: MappingAuditInput[] = [
     testType: "comlex2",
     categoryType: "competency_domain",
     rawName: "Practice-Based Learning and Improvement in Osteopathic Medical Practice",
+    source: "unknown",
+  },
+  {
+    testType: "comlex2",
+    categoryType: "competency_domain",
+    rawName: "Practice–Based Learning and Improvement in Osteopathic Medical Practice",
     source: "unknown",
   },
   {
@@ -177,8 +223,13 @@ if (process.argv.includes("--run")) {
   const report = runMappingAudit(SAMPLE_INPUTS);
   const requiredComlexRows = SAMPLE_INPUTS.filter((input) => input.testType === "comlex2");
   const failedWeightChecks = requiredComlexRows.filter((input) => {
+    const recoveredCategoryType = recoverCategoryTypeForComlex2(
+      input.testType,
+      String(input.categoryType),
+      input.rawName,
+    );
     const result = canonicalizeCategoryName(
-      input.categoryType,
+      recoveredCategoryType,
       input.rawName,
       input.testType,
       input.source ?? "unknown",
@@ -186,7 +237,16 @@ if (process.argv.includes("--run")) {
     if (!result.canonicalName) {
       return true;
     }
-    return getWeightForCategory(input.categoryType, result.canonicalName, input.testType) == null;
+    if (
+      recoveredCategoryType !== "competency_domain" &&
+      recoveredCategoryType !== "clinical_presentation" &&
+      recoveredCategoryType !== "discipline" &&
+      recoveredCategoryType !== "system" &&
+      recoveredCategoryType !== "physician_task"
+    ) {
+      return true;
+    }
+    return getWeightForCategory(recoveredCategoryType, result.canonicalName, input.testType) == null;
   });
 
   console.log(`Coverage: ${(report.coverage * 100).toFixed(1)}% (${report.mapped.length}/${SAMPLE_INPUTS.length})`);
@@ -195,6 +255,95 @@ if (process.argv.includes("--run")) {
     for (const failed of failedWeightChecks) {
       console.error(`- ${failed.categoryType}: ${failed.rawName}`);
     }
+    process.exitCode = 1;
+  }
+
+  const unknownBucketRow = report.mapped.find(
+    (entry) =>
+      entry.input.testType === "comlex2" &&
+      String(entry.input.categoryType) === "competency_domain_unknown1" &&
+      entry.input.rawName === "Osteopathic Patient Care and Procedural Skills",
+  );
+  if (!unknownBucketRow || unknownBucketRow.recoveredCategoryType !== "competency_domain") {
+    console.error(
+      'Unknown-bucket recovery failed for "Osteopathic Patient Care and Procedural Skills" -> competency_domain.',
+    );
+    process.exitCode = 1;
+  }
+
+  const unknownBucketOppRow = report.mapped.find(
+    (entry) =>
+      entry.input.testType === "comlex2" &&
+      String(entry.input.categoryType) === "competency_domain_unknown1" &&
+      entry.input.rawName === "Osteopathic Principles, Practice, and Manipulative Treatment",
+  );
+  if (!unknownBucketOppRow || unknownBucketOppRow.recoveredCategoryType !== "competency_domain") {
+    console.error(
+      'Unknown-bucket recovery failed for "Osteopathic Principles, Practice, and Manipulative Treatment" -> competency_domain.',
+    );
+    process.exitCode = 1;
+  }
+
+  const normalizedUnknownRows = [
+    {
+      name: "Osteopathic Patient Care and Procedural Skills",
+      categoryType: "competency_domain_unknown1",
+    },
+    {
+      name: "Osteopathic Principles, Practice, and Manipulative Treatment",
+      categoryType: "competency_domain_unknown1",
+    },
+  ].map((row) =>
+    normalizeRowForMapping("comlex2", {
+      testType: "comlex2",
+      categoryType: row.categoryType as CategoryType,
+      name: row.name,
+      originalName: row.name,
+      source: "unknown",
+      weight: null,
+      roi: 0,
+    }),
+  );
+
+  for (const row of normalizedUnknownRows) {
+    if (row.categoryType !== "competency_domain" || row.weight == null || row.unmapped) {
+      console.error(`normalizeRowForMapping regression for unknown bucket row: ${row.originalName ?? row.name}`);
+      process.exitCode = 1;
+    }
+  }
+
+  const missingCanonicalMappings = COMLEX_COMPETENCY_DOMAIN_CANONICAL.filter((canonicalName) => {
+    const result = canonicalizeCategoryName("competency_domain", canonicalName, "comlex2", "unknown");
+    if (!result.canonicalName) {
+      return true;
+    }
+    return getWeightForCategory("competency_domain", result.canonicalName, "comlex2") == null;
+  });
+
+  const comlexCompetencyWeightSum = COMLEX_COMPETENCY_DOMAIN_CANONICAL.reduce(
+    (sum, canonicalName) => sum + (COMPETENCY_DOMAIN_WEIGHTS[canonicalName] ?? 0),
+    0,
+  );
+
+  console.log("COMLEX2 competency-domain weight map:");
+  for (const canonicalName of COMLEX_COMPETENCY_DOMAIN_CANONICAL) {
+    const weight = COMPETENCY_DOMAIN_WEIGHTS[canonicalName] ?? 0;
+    console.log(`- ${canonicalName}: ${(weight * 100).toFixed(2)}%`);
+  }
+  console.log(`COMLEX2 competency-domain total: ${(comlexCompetencyWeightSum * 100).toFixed(2)}%`);
+
+  if (missingCanonicalMappings.length > 0) {
+    console.error("Canonical COMLEX competency domains missing mapping/weight:");
+    for (const missing of missingCanonicalMappings) {
+      console.error(`- ${missing}`);
+    }
+    process.exitCode = 1;
+  }
+
+  if (Math.abs(comlexCompetencyWeightSum - 1) > 1e-6) {
+    console.error(
+      `COMLEX competency weights must sum to 1.0 (100%). Found ${comlexCompetencyWeightSum.toFixed(6)}.`,
+    );
     process.exitCode = 1;
   }
 

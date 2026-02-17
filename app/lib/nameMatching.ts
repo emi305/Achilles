@@ -1,5 +1,6 @@
 import { getCategoryCandidates } from "./blueprint";
 import { MAPPING_CATALOG, type QbankSource } from "./mappingCatalog";
+import { sanitizeCategoryLabel } from "./textSanitize";
 import type { CategoryType, TestType } from "./types";
 
 export type MatchResult = {
@@ -8,62 +9,123 @@ export type MatchResult = {
   matchScore: number;
 };
 
+type PreparedEntry = {
+  canonicalName: string;
+  canonicalSanitized: string;
+  sourceAliasSanitized: Partial<Record<QbankSource, string[]>>;
+  aliasSanitized: string[];
+  regexes: RegExp[];
+};
+
 const MATCH_THRESHOLD = 0.84;
+const preparedCatalogCache = new Map<string, PreparedEntry[]>();
+const KNOWN_CATEGORY_TYPES: CategoryType[] = [
+  "competency_domain",
+  "clinical_presentation",
+  "discipline",
+  "system",
+  "physician_task",
+];
 
-function normalizeForMatch(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/rn/g, "m")
-    .replace(/[|]/g, "l")
-    .replace(/[^a-z0-9\s/&:()-]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+function isCategoryType(value: string): value is CategoryType {
+  return KNOWN_CATEGORY_TYPES.includes(value as CategoryType);
 }
 
-function normalizeComlexClinicalPresentation(raw: string): string {
-  let normalized = raw
-    .replace(/\bpatient presentations? related to (the )?/gi, "")
-    .replace(/\bpatient presentation related to (the )?/gi, "")
-    .replace(/\s*&\s*/g, " and ")
-    .replace(/\bsystems\b/g, "system")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  // Keep the wellness canonical phrase matchable from shortened NBOME/TrueLearn labels.
-  if (normalized === "community health") {
-    normalized = "community health and wellness";
-  }
-
-  return normalized;
-}
-
-function getNormalizedCandidates(
-  rawName: string,
+function preprocessForExamSpecificMatching(
+  sanitized: string,
   categoryType: CategoryType,
   testType: TestType,
-): string[] {
-  const base = normalizeForMatch(rawName);
+): string {
+  if (testType === "comlex2" && categoryType === "clinical_presentation") {
+    let value = sanitized
+      .replace(/^patient presentations? related to (the )?/, "")
+      .replace(/^patient presentation related to (the )?/, "")
+      .replace(/\bsystems\b/g, "system")
+      .trim();
+
+    if (value === "community health") {
+      value = "community health and wellness";
+    }
+    return value;
+  }
+
+  if (testType === "comlex2" && categoryType === "competency_domain") {
+    return sanitized
+      .replace(/\s+in osteopathic medicine$/, "")
+      .replace(/\s+in osteopathic medical practice$/, "")
+      .replace(/\s+for osteopathic medical practice$/, "")
+      .trim();
+  }
+
+  return sanitized;
+}
+
+function getPreparedCatalog(testType: TestType, categoryType: CategoryType): PreparedEntry[] {
+  const cacheKey = `${testType}::${categoryType}`;
+  const cached = preparedCatalogCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const catalog = MAPPING_CATALOG[testType]?.[categoryType] ?? {};
+  const prepared: PreparedEntry[] = Object.entries(catalog).map(([canonicalName, meta]) => {
+    const sourceAliasSanitized: Partial<Record<QbankSource, string[]>> = {};
+    const bySource = meta?.bySource ?? {};
+
+    for (const source of Object.keys(bySource) as QbankSource[]) {
+      sourceAliasSanitized[source] = (bySource[source] ?? []).map((alias) =>
+        preprocessForExamSpecificMatching(sanitizeCategoryLabel(alias), categoryType, testType),
+      );
+    }
+
+    const regexes = (meta?.regex ?? []).flatMap((pattern) => {
+      try {
+        return [new RegExp(pattern, "i")];
+      } catch {
+        return [];
+      }
+    });
+
+    return {
+      canonicalName,
+      canonicalSanitized: preprocessForExamSpecificMatching(
+        sanitizeCategoryLabel(canonicalName),
+        categoryType,
+        testType,
+      ),
+      sourceAliasSanitized,
+      aliasSanitized: (meta?.aliases ?? []).map((alias) =>
+        preprocessForExamSpecificMatching(sanitizeCategoryLabel(alias), categoryType, testType),
+      ),
+      regexes,
+    };
+  });
+
+  preparedCatalogCache.set(cacheKey, prepared);
+  return prepared;
+}
+
+function getNormalizedCandidates(rawName: string, categoryType: CategoryType, testType: TestType): string[] {
+  const base = preprocessForExamSpecificMatching(sanitizeCategoryLabel(rawName), categoryType, testType);
   const candidates = new Set<string>();
 
   if (base) {
     candidates.add(base);
   }
 
-  if (testType === "comlex2" && categoryType === "clinical_presentation") {
-    const stripped = normalizeForMatch(normalizeComlexClinicalPresentation(rawName));
-    if (stripped) {
-      candidates.add(stripped);
-      candidates.add(stripped.replace(/\bsystems\b/g, "system"));
-      candidates.add(stripped.replace(/\b(system)\b/g, "systems"));
-    }
+  if (testType === "comlex2" && categoryType === "clinical_presentation" && base) {
+    candidates.add(base.replace(/\bsystems\b/g, "system"));
+    candidates.add(base.replace(/\b(system)\b/g, "systems"));
   }
 
   return Array.from(candidates);
 }
 
 function simplifyForSimilarity(name: string): string {
-  return normalizeForMatch(name)
+  return sanitizeCategoryLabel(name)
     .replace(/\b(patient|presentations|presentation|related|to|the|and|of)\b/g, " ")
+    .replace(/rn/g, "m")
+    .replace(/[|]/g, "l")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -100,24 +162,11 @@ function similarity(a: string, b: string): number {
   return maxLen === 0 ? 1 : 1 - distance / maxLen;
 }
 
-function getCatalog(testType: TestType, categoryType: CategoryType) {
-  return MAPPING_CATALOG[testType]?.[categoryType] ?? {};
-}
-
-function tryRegexMatch(catalog: ReturnType<typeof getCatalog>, rawNormalized: string): MatchResult | null {
-  for (const [canonicalName, meta] of Object.entries(catalog)) {
-    if (!meta) {
-      continue;
-    }
-    const regexPatterns = meta.regex ?? [];
-    for (const pattern of regexPatterns) {
-      try {
-        const re = new RegExp(pattern, "i");
-        if (re.test(rawNormalized)) {
-          return { canonicalName, matchType: "regex", matchScore: 0.95 };
-        }
-      } catch {
-        continue;
+function tryRegexMatch(preparedCatalog: PreparedEntry[], rawNormalized: string): MatchResult | null {
+  for (const entry of preparedCatalog) {
+    for (const re of entry.regexes) {
+      if (re.test(rawNormalized)) {
+        return { canonicalName: entry.canonicalName, matchType: "regex", matchScore: 0.95 };
       }
     }
   }
@@ -125,29 +174,23 @@ function tryRegexMatch(catalog: ReturnType<typeof getCatalog>, rawNormalized: st
 }
 
 function tryAliasMatch(
-  catalog: ReturnType<typeof getCatalog>,
+  preparedCatalog: PreparedEntry[],
   normalizedCandidates: string[],
   source: QbankSource,
 ): MatchResult | null {
-  for (const [canonicalName, meta] of Object.entries(catalog)) {
-    if (!meta) {
-      continue;
-    }
-    const sourceAliases = meta.bySource?.[source] ?? [];
+  for (const entry of preparedCatalog) {
+    const sourceAliases = entry.sourceAliasSanitized[source] ?? [];
     for (const alias of sourceAliases) {
-      if (normalizedCandidates.includes(normalizeForMatch(alias))) {
-        return { canonicalName, matchType: "alias", matchScore: 1 };
+      if (normalizedCandidates.includes(alias)) {
+        return { canonicalName: entry.canonicalName, matchType: "alias", matchScore: 1 };
       }
     }
   }
 
-  for (const [canonicalName, meta] of Object.entries(catalog)) {
-    if (!meta) {
-      continue;
-    }
-    for (const alias of meta.aliases) {
-      if (normalizedCandidates.includes(normalizeForMatch(alias))) {
-        return { canonicalName, matchType: "alias", matchScore: 0.98 };
+  for (const entry of preparedCatalog) {
+    for (const alias of entry.aliasSanitized) {
+      if (normalizedCandidates.includes(alias)) {
+        return { canonicalName: entry.canonicalName, matchType: "alias", matchScore: 0.98 };
       }
     }
   }
@@ -156,7 +199,7 @@ function tryAliasMatch(
 }
 
 export function canonicalizeCategoryName(
-  categoryType: CategoryType,
+  categoryType: CategoryType | string,
   rawName: string,
   testType: TestType,
   source: QbankSource = "unknown",
@@ -165,40 +208,57 @@ export function canonicalizeCategoryName(
     throw new Error("canonicalizeCategoryName requires testType.");
   }
 
-  const trimmed = rawName.trim();
-  if (!trimmed) {
+  const recoveredType = recoverCategoryTypeForComlex2(testType, categoryType, rawName);
+  if (!isCategoryType(recoveredType)) {
     return { canonicalName: null, matchType: "none", matchScore: 0 };
   }
 
-  const normalizedCandidates = getNormalizedCandidates(trimmed, categoryType, testType);
-  const catalog = getCatalog(testType, categoryType);
+  if (
+    process.env.NODE_ENV === "development" &&
+    testType === "comlex2" &&
+    categoryType !== recoveredType &&
+    String(categoryType).toLowerCase().includes("unknown")
+  ) {
+    console.log(`[recoverType] comlex2 "${categoryType}" -> "${recoveredType}" for "${rawName}"`);
+  }
 
-  for (const canonicalName of Object.keys(catalog)) {
-    if (normalizedCandidates.includes(normalizeForMatch(canonicalName))) {
-      return { canonicalName, matchType: "exact", matchScore: 1 };
+  const normalizedCandidates = getNormalizedCandidates(rawName, recoveredType, testType);
+  if (normalizedCandidates.length === 0) {
+    return { canonicalName: null, matchType: "none", matchScore: 0 };
+  }
+
+  const preparedCatalog = getPreparedCatalog(testType, recoveredType);
+
+  for (const entry of preparedCatalog) {
+    if (normalizedCandidates.includes(entry.canonicalSanitized)) {
+      return { canonicalName: entry.canonicalName, matchType: "exact", matchScore: 1 };
     }
   }
 
-  const aliasMatch = tryAliasMatch(catalog, normalizedCandidates, source);
+  const aliasMatch = tryAliasMatch(preparedCatalog, normalizedCandidates, source);
   if (aliasMatch) {
     return aliasMatch;
   }
 
   for (const candidate of normalizedCandidates) {
-    const regexMatch = tryRegexMatch(catalog, candidate);
+    const regexMatch = tryRegexMatch(preparedCatalog, candidate);
     if (regexMatch) {
       return regexMatch;
     }
   }
 
   // Fuzzy fallback remains strictly within same exam + categoryType canonical candidates.
-  const candidates = getCategoryCandidates(categoryType, testType);
+  const candidates = getCategoryCandidates(recoveredType, testType);
   let bestName: string | null = null;
   let bestScore = 0;
-  const similarityRaw = simplifyForSimilarity(trimmed);
+  const similarityRawCandidates = normalizedCandidates.map((value) => simplifyForSimilarity(value)).filter(Boolean);
 
   for (const candidate of candidates) {
-    const score = similarity(similarityRaw, simplifyForSimilarity(candidate));
+    const candidateSimplified = simplifyForSimilarity(candidate);
+    const score = Math.max(
+      ...similarityRawCandidates.map((similarityRaw) => similarity(similarityRaw, candidateSimplified)),
+      0,
+    );
     if (score > bestScore) {
       bestScore = score;
       bestName = candidate;
@@ -210,4 +270,41 @@ export function canonicalizeCategoryName(
   }
 
   return { canonicalName: null, matchType: "none", matchScore: bestScore };
+}
+
+export function recoverCategoryTypeForComlex2(
+  testType: TestType,
+  rawCategoryType: string,
+  rawLabel: string,
+): string {
+  if (testType !== "comlex2") {
+    return rawCategoryType;
+  }
+
+  const categoryToken = sanitizeCategoryLabel(rawCategoryType).replace(/\s+/g, "_");
+  if (!categoryToken.includes("unknown")) {
+    return rawCategoryType;
+  }
+
+  const sanitizedLabel = sanitizeCategoryLabel(rawLabel);
+  if (!sanitizedLabel) {
+    return rawCategoryType;
+  }
+
+  const orderedCandidates: CategoryType[] = [
+    "competency_domain",
+    "clinical_presentation",
+    "discipline",
+    "system",
+    "physician_task",
+  ];
+
+  for (const candidateType of orderedCandidates) {
+    const attempt = canonicalizeCategoryName(candidateType, rawLabel, testType, "unknown");
+    if (attempt.matchType !== "none" && attempt.canonicalName) {
+      return candidateType;
+    }
+  }
+
+  return rawCategoryType;
 }

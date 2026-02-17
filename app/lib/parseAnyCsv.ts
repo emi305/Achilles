@@ -98,13 +98,16 @@ function parseAchillesSimple(lines: string[], testType: TestType, source: QbankS
 
   for (let index = 1; index < lines.length; index += 1) {
     const lineNumber = index + 1;
-    const parts = splitCsvLine(lines[index]).map((cell) => cell.trim());
+    const parts = splitCsvLine(lines[index]);
 
     if (parts.length !== 4) {
       throw new Error(`Invalid CSV row on line ${lineNumber}. Expected 4 columns.`);
     }
 
-    const [categoryTypeRaw, nameRaw, correctRaw, totalRaw] = parts;
+    const categoryTypeRaw = parts[0]?.trim() ?? "";
+    const nameRaw = parts[1] ?? "";
+    const correctRaw = parts[2] ?? "";
+    const totalRaw = parts[3] ?? "";
     if (
       categoryTypeRaw !== "competency_domain" &&
       categoryTypeRaw !== "clinical_presentation" &&
@@ -135,13 +138,15 @@ function parseCategoryPerformance(
 
   for (let index = 1; index < lines.length; index += 1) {
     const lineNumber = index + 1;
-    const parts = splitCsvLine(lines[index]).map((cell) => cell.trim());
+    const parts = splitCsvLine(lines[index]);
 
     if (parts.length !== 4) {
       throw new Error(`Invalid CSV row on line ${lineNumber}. Expected 4 columns.`);
     }
 
-    const [nameRaw, correctRaw, , totalRaw] = parts;
+    const nameRaw = parts[0] ?? "";
+    const correctRaw = parts[1] ?? "";
+    const totalRaw = parts[3] ?? "";
     const correct = parseInteger(correctRaw, "correct", lineNumber);
     const total = parseInteger(totalRaw, "total", lineNumber);
     parsedRows.push(buildRow(defaultCategoryType, nameRaw, correct, total, lineNumber, testType, source));
@@ -160,13 +165,15 @@ function parsePercentCorrectTemplate(
 
   for (let index = 1; index < lines.length; index += 1) {
     const lineNumber = index + 1;
-    const parts = splitCsvLine(lines[index]).map((cell) => cell.trim());
+    const parts = splitCsvLine(lines[index]);
 
     if (parts.length !== 3) {
       throw new Error(`Invalid CSV row on line ${lineNumber}. Expected 3 columns.`);
     }
 
-    const [nameRaw, percentCorrectRaw, totalRaw] = parts;
+    const nameRaw = parts[0] ?? "";
+    const percentCorrectRaw = parts[1] ?? "";
+    const totalRaw = parts[2] ?? "";
     const percentCorrect = parsePercentCorrect(percentCorrectRaw, lineNumber);
     const total = parseInteger(totalRaw, "total", lineNumber);
     const correct = Math.round(percentCorrect * total);
