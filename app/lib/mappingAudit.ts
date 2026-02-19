@@ -458,6 +458,7 @@ if (process.argv.includes("--run")) {
       categoryType: "uworld_system",
       name,
       correct: 10,
+      incorrectCount: 10,
       total: 20,
       confidence: 1,
     })),
@@ -492,6 +493,7 @@ if (process.argv.includes("--run")) {
         categoryType: "uworld_system",
         name: "Psychiatric/Behavioral & Substance Use Disorder",
         correct: 71,
+        incorrectCount: 74,
         total: 145,
         confidence: 1,
       },
@@ -510,10 +512,31 @@ if (process.argv.includes("--run")) {
 
   const nonZeroRoiFixtures = normalizeExtractRows(
     [
-      { categoryType: "uworld_system", name: "Pregnancy, Childbirth & Puerperium", correct: 51, total: 96, confidence: 1 },
-      { categoryType: "uworld_system", name: "Social Sciences (Ethics/Legal/Professional)", correct: 15, total: 19, confidence: 1 },
-      { categoryType: "uworld_system", name: "Allergy & Immunology", correct: 10, total: 20, confidence: 1 },
-      { categoryType: "uworld_system", name: "Musculoskeletal Sys/Skin & Subcutaneous Tissue", correct: 20, total: 40, confidence: 1 },
+      {
+        categoryType: "uworld_system",
+        name: "Pregnancy, Childbirth & Puerperium",
+        correct: 51,
+        incorrectCount: 45,
+        total: 96,
+        confidence: 1,
+      },
+      {
+        categoryType: "uworld_system",
+        name: "Social Sciences (Ethics/Legal/Professional)",
+        correct: 15,
+        incorrectCount: 4,
+        total: 19,
+        confidence: 1,
+      },
+      { categoryType: "uworld_system", name: "Allergy & Immunology", correct: 10, incorrectCount: 10, total: 20, confidence: 1 },
+      {
+        categoryType: "uworld_system",
+        name: "Musculoskeletal Sys/Skin & Subcutaneous Tissue",
+        correct: 20,
+        incorrectCount: 20,
+        total: 40,
+        confidence: 1,
+      },
     ],
     "usmle_step2",
     "uworld",
@@ -556,6 +579,7 @@ if (process.argv.includes("--run")) {
   const avgChecks: Array<{ label: string; correct: number; incorrect: number; expected: number | null }> = [
     { label: "Medicine (IM)", correct: 24, incorrect: 36, expected: 40.0 },
     { label: "Psychiatry", correct: 70, incorrect: 74, expected: 48.6 },
+    { label: "OB", correct: 107, incorrect: 107, expected: 50.0 },
     { label: "Social Sciences", correct: 15, incorrect: 4, expected: 78.9 },
     { label: "Behavioral Health", correct: 71, incorrect: 74, expected: 49.0 },
     { label: "Pregnancy", correct: 51, incorrect: 45, expected: 53.1 },
@@ -563,13 +587,41 @@ if (process.argv.includes("--run")) {
   ];
   for (const check of avgChecks) {
     const actual = computeAvgPercentCorrect(check.correct, check.incorrect);
-    const rounded = actual == null ? null : Math.round(actual * 10) / 10;
-    if (rounded !== check.expected) {
+    if (check.expected == null) {
+      if (actual != null) {
+        console.error(
+          `[avg-correct] ${check.label} failed: expected null got ${String(actual)}`,
+        );
+        process.exitCode = 1;
+      }
+      continue;
+    }
+    if (actual == null || Math.abs(actual - check.expected) > 0.1) {
       console.error(
-        `[avg-correct] ${check.label} failed: expected ${String(check.expected)} got ${String(rounded)}`,
+        `[avg-correct] ${check.label} failed: expected ${String(check.expected)} got ${String(actual)}`,
       );
       process.exitCode = 1;
     }
+  }
+
+  const missingIncorrectAudit = normalizeExtractRows(
+    [
+      {
+        categoryType: "uworld_subject",
+        name: "Medicine (IM)",
+        correct: 24,
+        total: 60,
+        confidence: 1,
+      },
+    ],
+    "usmle_step2",
+    "uworld",
+    "uworld_qbank",
+  );
+  const missingIncorrectRow = missingIncorrectAudit.parsedRows[0];
+  if (!missingIncorrectRow || missingIncorrectRow.roi !== null || typeof missingIncorrectRow.accuracy === "number") {
+    console.error("[avg-correct] missing-incorrect invariant failed: expected null ROI and null-ish accuracy.");
+    process.exitCode = 1;
   }
 
   if (Math.abs(USMLE_STEP2_SUBJECT_WEIGHT_SUM - 1) > 1e-6) {

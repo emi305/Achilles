@@ -1,4 +1,5 @@
 import { getWeightForCategory } from "./blueprint";
+import { computeAccuracy, parseIntSafe } from "./avgCorrect";
 import { canonicalizeCategoryName } from "./nameMatching";
 import type { QbankSource } from "./mappingCatalog";
 import type { ExtractedRow, InputSource, NormalizedExtractResult, ParsedRow, TestType } from "./types";
@@ -19,20 +20,8 @@ function toNumberOrUndefined(value: unknown): number | undefined {
 }
 
 function toIntOrUndefined(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return Math.trunc(value);
-  }
-  if (typeof value === "string") {
-    const normalized = value.trim().replace(/,/g, "");
-    if (!normalized) {
-      return undefined;
-    }
-    const parsed = Number.parseInt(normalized, 10);
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  }
-  return undefined;
+  const parsed = parseIntSafe(value);
+  return parsed == null ? undefined : parsed;
 }
 
 function clamp01(value: number) {
@@ -218,6 +207,32 @@ function getSplitParts(name: string): string[] {
     .filter((part) => part.length > 0);
 }
 
+const UWORLD_SYSTEM_CANONICAL_OVERRIDES: Record<string, string> = {
+  "cardiovascular system": "Cardiovascular",
+  "endocrine, diabetes & metabolism": "Endocrine",
+  "gastrointestinal & nutrition": "Gastrointestinal",
+  "nervous system": "Nervous System & Special Senses",
+  "pulmonary & critical care": "Respiratory",
+  "renal, urinary systems & electrolytes": "Renal/Urinary & Reproductive",
+  "female reproductive system & breast": "Renal/Urinary & Reproductive",
+  "male reproductive system": "Renal/Urinary & Reproductive",
+  "allergy & immunology": "Immune",
+  "hematology & oncology": "Blood & Lymphoreticular",
+  "miscellaneous (multisystem)": "Multisystem Processes & Disorders",
+  "psychiatric/behavioral & substance use disorder": "Psych/Behavioral & Substance Use",
+  "biostatistics & epidemiology": "Biostatistics/Epi/Population Health/Med Lit",
+  "social sciences (ethics/legal/professional)": "Social Sciences",
+  "ear, nose & throat (ent)": "Nervous System & Special Senses",
+  ent: "Nervous System & Special Senses",
+  dermatology: "MSK / Skin & Subcutaneous",
+  "rheumatology/orthopedics & sports": "MSK / Skin & Subcutaneous",
+};
+
+function maybeCanonicalizeUworldSystemLabel(name: string): string {
+  const normalized = name.trim().toLowerCase();
+  return UWORLD_SYSTEM_CANONICAL_OVERRIDES[normalized] ?? name;
+}
+
 function shouldAttemptSplit(name: string): boolean {
   return /\/|&|\sand\s/i.test(name);
 }
@@ -299,18 +314,23 @@ function buildParsedRow(
   inputSource: InputSource = "unknown",
 ): { parsedRow?: ParsedRow; warning?: string; missingRequired: boolean } {
   const normalizedRow = normalizeExtractedRow(row);
-  const nameForMatch = normalizedRow.mappedCanonicalName?.trim() || normalizedRow.name;
+  const rawNameForMatch = normalizedRow.mappedCanonicalName?.trim() || normalizedRow.name;
+  const nameForMatch =
+    normalizedRow.categoryType === "uworld_system"
+      ? maybeCanonicalizeUworldSystemLabel(rawNameForMatch)
+      : rawNameForMatch;
   const matched = canonicalizeCategoryName(normalizedRow.categoryType, nameForMatch, testType, source);
   const canonicalName = matched.canonicalName;
   const displayName = canonicalName ?? normalizedRow.name;
   const total = toNumberOrUndefined(normalizedRow.total);
   let correct = toNumberOrUndefined(normalizedRow.correct);
-  const incorrectCount = toIntOrUndefined(normalizedRow.incorrectCount);
+  let incorrectCount = toIntOrUndefined(normalizedRow.incorrectCount);
   const omittedCount = toIntOrUndefined(normalizedRow.omittedCount);
   const usageUsed = toIntOrUndefined(normalizedRow.usageUsed);
   const usageTotal = toIntOrUndefined(normalizedRow.usageTotal);
   const percentCorrect = toNumberOrUndefined(normalizedRow.percentCorrect);
   const proxyWeakness = normalizeProxyWeakness(normalizedRow.proxyWeakness);
+  const hasPartialQbank = typeof correct === "number" || (typeof total === "number" && total > 0);
 
   if (typeof total === "number" && total <= 0) {
     return {
@@ -323,10 +343,29 @@ function buildParsedRow(
     correct = Math.round(percentCorrect * total);
   }
 
+  // If incorrectCount is missing but we have correct + percentCorrect, derive attempted/incorrect.
+  if (
+    incorrectCount == null &&
+    typeof correct === "number" &&
+    Number.isFinite(correct) &&
+    correct >= 0 &&
+    typeof percentCorrect === "number" &&
+    Number.isFinite(percentCorrect) &&
+    percentCorrect > 0 &&
+    percentCorrect <= 1
+  ) {
+    let attempted = Math.round(correct / percentCorrect);
+    if (attempted < correct) {
+      attempted = Math.ceil(correct);
+    }
+    incorrectCount = attempted - correct;
+  }
+
   const hasQbankMetrics =
     typeof correct === "number" &&
-    ((typeof total === "number" && total > 0) || (typeof incorrectCount === "number" && incorrectCount >= 0));
-  if (!hasQbankMetrics && typeof proxyWeakness !== "number") {
+    typeof incorrectCount === "number" &&
+    incorrectCount >= 0;
+  if (!hasQbankMetrics && typeof proxyWeakness !== "number" && !hasPartialQbank) {
     return {
       warning: `${displayName}: missing both QBank metrics and score-report proxy weakness.`,
       missingRequired: true,
@@ -340,12 +379,7 @@ function buildParsedRow(
 
   if (hasQbankMetrics) {
     const safeCorrect = correct as number;
-    const attemptedFromCounts =
-      typeof incorrectCount === "number" && incorrectCount >= 0 ? safeCorrect + incorrectCount : undefined;
-    const safeTotal =
-      typeof attemptedFromCounts === "number" && attemptedFromCounts > 0
-        ? attemptedFromCounts
-        : (total as number);
+    const safeTotal = safeCorrect + (incorrectCount as number);
 
     if (safeCorrect > safeTotal) {
       return {
@@ -356,11 +390,15 @@ function buildParsedRow(
 
     qbankTotal = safeTotal;
     qbankCorrect = safeCorrect;
-    qbankIncorrect = typeof incorrectCount === "number" ? incorrectCount : undefined;
-    accuracy = safeCorrect / safeTotal;
+    qbankIncorrect = incorrectCount as number;
+    const computedAccuracy = computeAccuracy(qbankCorrect, qbankIncorrect);
+    accuracy = computedAccuracy == null ? undefined : computedAccuracy;
+  } else if (hasPartialQbank) {
+    qbankCorrect = typeof correct === "number" ? correct : undefined;
+    qbankTotal = typeof total === "number" ? total : undefined;
   }
   const weight = canonicalName ? getWeightForCategory(row.categoryType, canonicalName, testType) : null;
-  const roi = typeof accuracy === "number" ? (1 - accuracy) * (weight ?? 0) : 0;
+  const roi = typeof accuracy === "number" ? (1 - accuracy) * (weight ?? 0) : null;
   const proi = typeof proxyWeakness === "number" ? proxyWeakness * (weight ?? 0) : 0;
 
   if (process.env.NODE_ENV === "development") {

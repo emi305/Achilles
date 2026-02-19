@@ -1,4 +1,5 @@
 import { getWeightForCategory } from "./blueprint";
+import { computeAccuracy } from "./avgCorrect";
 import { canonicalizeCategoryName, recoverCategoryTypeForComlex2 } from "./nameMatching";
 import type { ParsedRow, CategoryType, TestType } from "./types";
 
@@ -17,11 +18,21 @@ function isCategoryType(value: string): value is CategoryType {
 }
 
 function normalizeAccuracy(row: ParsedRow): number | undefined {
-  if (typeof row.accuracy === "number") {
-    return row.accuracy;
+  if (typeof row.correct === "number" && typeof row.incorrectCount === "number") {
+    const fromCounts = computeAccuracy(row.correct, row.incorrectCount);
+    if (fromCounts != null) {
+      return fromCounts;
+    }
   }
   if (typeof row.correct === "number" && typeof row.total === "number" && row.total > 0) {
-    return row.correct / row.total;
+    const inferredIncorrect = Math.max(0, row.total - row.correct);
+    const fromTotal = computeAccuracy(row.correct, inferredIncorrect);
+    if (fromTotal != null) {
+      return fromTotal;
+    }
+  }
+  if (typeof row.accuracy === "number") {
+    return row.accuracy;
   }
   return undefined;
 }
@@ -56,7 +67,7 @@ export function normalizeRowForMapping(testType: TestType, row: ParsedRow): Pars
   const canonicalName = matched.canonicalName;
   const weight = canonicalName ? getWeightForCategory(recoveredTypeRaw, canonicalName, testType) : null;
   const accuracy = normalizeAccuracy(row);
-  const roi = typeof accuracy === "number" ? (1 - accuracy) * (weight ?? 0) : 0;
+  const roi = typeof accuracy === "number" ? (1 - accuracy) * (weight ?? 0) : null;
   const proi =
     typeof row.proxyWeakness === "number"
       ? row.proxyWeakness * (weight ?? 0)

@@ -30,7 +30,7 @@ export type ParsedRow = {
   total?: number;
   accuracy?: number;
   weight: number | null;
-  roi: number;
+  roi: number | null;
   proxyWeakness?: number;
   proi?: number;
   source?: import("./mappingCatalog").QbankSource;
