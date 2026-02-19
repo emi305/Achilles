@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
@@ -556,7 +556,7 @@ function buildWhatToStudyBullets(row: DisplayRow, ranks: RankContext, hasScoreRe
   const hasScoreReportSignal = hasScoreReport && row.hasProi;
 
   if (!hasQbank && !hasScoreReportSignal) {
-    bullets.push("Not enough data yet—add QBank or a score report to prioritize this accurately.");
+    bullets.push("Not enough data yetâ€”add QBank or a score report to prioritize this accurately.");
     return bullets;
   }
 
@@ -647,7 +647,7 @@ function RankTable({
                 <td className="px-3 py-2 text-stone-900">{row.name}</td>
                 <td className="px-3 py-2 text-stone-500 text-xs">{CATEGORY_LABEL_BY_TYPE[row.categoryType]}</td>
                 <td className="px-3 py-2 text-stone-700">
-                  {typeof row.blueprintWeight === "number" ? formatPercent(row.blueprintWeight) : "—"}
+                  {typeof row.blueprintWeight === "number" ? formatPercent(row.blueprintWeight) : "â€”"}
                 </td>
                 {mode === "roi" ? (
                   <>
@@ -656,7 +656,7 @@ function RankTable({
                         formatScore(row.roi)
                       ) : (
                         <>
-                          <span>—</span> <span className="text-xs text-stone-500">(insufficient QBank data)</span>
+                          <span>â€”</span> <span className="text-xs text-stone-500">(insufficient QBank data)</span>
                         </>
                       )}
                     </td>
@@ -672,7 +672,7 @@ function RankTable({
                       formatPercentFrom100(row.avgPercentCorrect)
                     ) : (
                       <>
-                        <span>—</span> <span className="text-xs text-stone-500">(insufficient QBank data)</span>
+                        <span>â€”</span> <span className="text-xs text-stone-500">(insufficient QBank data)</span>
                       </>
                     )}
                   </td>
@@ -923,13 +923,6 @@ export default function ResultsPage() {
     });
   }, [roiRankedValidRows, whatToStudySystems]);
   const big3Roi = useMemo(() => buildBig3Data(aggregated, "roi"), [aggregated]);
-  const big3Proi = useMemo(() => buildBig3Data(aggregated, "proi"), [aggregated]);
-  const hasUworldQbankRows = useMemo(
-    () =>
-      selectedTest === "usmle_step2" &&
-      parsedRows.some((row) => row.inputSource === "uworld_qbank" || isUworldTaxonomyRow(row)),
-    [parsedRows, selectedTest],
-  );
   const hasScoreReportData = useMemo(() => {
     const sessionFlag = uploadSession?.scoreReportProvided;
     if (typeof sessionFlag === "boolean") {
@@ -943,6 +936,40 @@ export default function ResultsPage() {
     () => hasScoreReportData && aggregated.some((row) => row.hasProi),
     [aggregated, hasScoreReportData],
   );
+  const isProiMode = (rankingMode as string) === "proi";
+  const activePriorityMetric: "roi" | "proi" = isProiMode && hasScoreReportData ? "proi" : "roi";
+  const usmlePriorityRows = useMemo(() => {
+    const rows = aggregated.filter((row) => isUworldTaxonomyRow(row));
+    if (activePriorityMetric === "proi") {
+      return rows
+        .filter((row) => row.hasProi && Number.isFinite(row.proi))
+        .sort((a, b) => b.proi - a.proi);
+    }
+    return rows
+      .filter((row) => row.attemptedCount > 0 && typeof row.roi === "number")
+      .sort((a, b) => (b.roi ?? Number.NEGATIVE_INFINITY) - (a.roi ?? Number.NEGATIVE_INFINITY));
+  }, [activePriorityMetric, aggregated]);
+  const rankedSubjectsByPriority = useMemo(
+    () => usmlePriorityRows.filter((row) => row.categoryType === "uworld_subject"),
+    [usmlePriorityRows],
+  );
+  const rankedSystemsByPriority = useMemo(
+    () => usmlePriorityRows.filter((row) => row.categoryType === "uworld_system"),
+    [usmlePriorityRows],
+  );
+  const victoryTopSubject = rankedSubjectsByPriority[0];
+  const victoryTopSystems = rankedSystemsByPriority.slice(0, 3);
+  const achillesHeelItem = useMemo(() => {
+    const topSubject = rankedSubjectsByPriority[0];
+    const topSystem = rankedSystemsByPriority[0];
+    if (!topSubject) return topSystem;
+    if (!topSystem) return topSubject;
+    const subjectValue = activePriorityMetric === "proi" ? topSubject.proi : (topSubject.roi ?? Number.NEGATIVE_INFINITY);
+    const systemValue = activePriorityMetric === "proi" ? topSystem.proi : (topSystem.roi ?? Number.NEGATIVE_INFINITY);
+    return subjectValue >= systemValue ? topSubject : topSystem;
+  }, [activePriorityMetric, rankedSubjectsByPriority, rankedSystemsByPriority]);
+  const whatToStudyTopSubjects = rankedSubjectsByPriority.slice(0, 3);
+  const whatToStudyTopSystems = rankedSystemsByPriority.slice(0, 3);
   const big3RoiKeySet = useMemo(() => {
     const keys = new Set<string>();
     const add = (row?: DisplayRow) => {
@@ -1538,7 +1565,7 @@ export default function ResultsPage() {
       <BrandHeader />
       {isDevNoSession ? (
         <Alert variant="error">
-          DEV MODE: no results session found — showing empty debug view.
+          DEV MODE: no results session found â€” showing empty debug view.
         </Alert>
       ) : null}
       <div id="results-print-root" className="space-y-6">
@@ -1604,174 +1631,179 @@ export default function ResultsPage() {
 
       {mappingFailureRate > 0.05 ? (
         <Alert variant="error">
-          {`Mapping failed — many categories could not be matched to the ${getTestLabel(selectedTest)} blueprint. This is a bug. Please re-upload or report.`}
+          {`Mapping failed â€” many categories could not be matched to the ${getTestLabel(selectedTest)} blueprint. This is a bug. Please re-upload or report.`}
         </Alert>
       ) : null}
 
-      <Card title="Achilles Insight" className="print-avoid-break">
-        <ul className="space-y-4 text-sm text-stone-800">
-          {whatToStudyItems.map((row) => (
-            <li key={`insight-${row.categoryType}-${row.name}`} className="rounded-md border border-stone-200 bg-stone-50/40 p-3">
-              <p className="font-semibold text-stone-900">
-                {row.name} ({CATEGORY_LABEL_BY_TYPE[row.categoryType]})
-              </p>
-              <p>
-                Weight: {row.blueprintWeight == null ? "—" : formatPercent(row.blueprintWeight)} | ROI:{" "}
-                {hasUsableQbankData(row) ? formatScore(row.roi) : "— (insufficient QBank data)"}
-                {showProiColumn ? ` | PROI: ${row.hasProi ? formatScore(row.proi) : PROI_PLACEHOLDER}` : ""}
-                {" | "}Avg % Correct:{" "}
-                {typeof row.avgPercentCorrect === "number"
-                  ? formatPercentFrom100(row.avgPercentCorrect)
-                  : "— (insufficient QBank data)"}
-              </p>
-            </li>
-          ))}
-        </ul>
-      </Card>
-
-      <Card title="What to study?" className="print-avoid-break">
-        <ul className="space-y-4 text-sm text-stone-800">
-          {whatToStudyItems.map((row) => (
-            <li key={`study-${row.categoryType}-${row.name}`} className="rounded-md border border-stone-200 bg-stone-50/40 p-3">
-              <p className="font-semibold text-stone-900">
-                {row.name} ({CATEGORY_LABEL_BY_TYPE[row.categoryType]})
-                {big3RoiKeySet.has(`${row.categoryType}::${row.name}`) ? (
-                  <span className="ml-2 inline-flex items-center rounded border border-stone-300 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-stone-600">
-                    In Big-3
-                  </span>
-                ) : null}
-              </p>
-              <ul className="list-disc pl-5">
-                {buildWhatToStudyBullets(row, {
-                  roiRank: roiRankMap.get(`${row.categoryType}::${row.name}`) ?? 0,
-                  proiRank: proiRankMap.get(`${row.categoryType}::${row.name}`),
-                  avgRank: avgRankMap.get(`${row.categoryType}::${row.name}`),
-                }, hasScoreReportData).map((bullet) => (
-                  <li key={`${row.name}-study-${bullet}`}>{bullet}</li>
-                ))}
-              </ul>
-            </li>
-          ))}
-        </ul>
-      </Card>
-
       {selectedTest === "usmle_step2" ? (
-        <Card className="print-avoid-break">
-          <div className="space-y-1 text-sm text-stone-700">
-            {hasUworldQbankRows ? <p>QBank ROI (Subjects/Systems)</p> : null}
-            {hasScoreReportData ? <p>PROI (Score Report / NBME / Free120)</p> : null}
-          </div>
-        </Card>
-      ) : null}
+        <>
+          <Card title="VICTORY" className="print-avoid-break">
+            <div className="rounded-md border border-stone-200 bg-stone-50/40 p-3 text-sm text-stone-800">
+              <p className="text-xs uppercase tracking-wide text-stone-500">
+                Active metric: {activePriorityMetric === "proi" ? "PROI" : "ROI"}
+              </p>
+              <p className="mt-2 font-semibold text-stone-900">Top Subject</p>
+              {victoryTopSubject ? (
+                <p>
+                  {victoryTopSubject.name} | {activePriorityMetric === "proi" ? "PROI" : "ROI"}: {" "}
+                  {activePriorityMetric === "proi"
+                    ? formatScore(victoryTopSubject.proi)
+                    : hasUsableQbankData(victoryTopSubject)
+                      ? formatScore(victoryTopSubject.roi)
+                      : "— (insufficient QBank data)"}{" "}
+                  | Weight: {" "}
+                  {victoryTopSubject.blueprintWeight == null ? "—" : formatPercent(victoryTopSubject.blueprintWeight)}{" "}
+                  | Avg % Correct: {" "}
+                  {typeof victoryTopSubject.avgPercentCorrect === "number"
+                    ? formatPercentFrom100(victoryTopSubject.avgPercentCorrect)
+                    : "— (insufficient QBank data)"}
+                </p>
+              ) : (
+                <p>— (insufficient QBank data)</p>
+              )}
 
-      {selectedTest === "usmle_step2" && (big3Roi.hasData || (hasScoreReportData && big3Proi.hasData)) ? (
-        <Card title="Big-3" className="print-avoid-break">
-          <p className="text-sm text-stone-700">
-            Big-3 = your highest-impact study targets right now. ROI uses QBank performance
-            {hasScoreReportData
-              ? "; PROI uses score-report weakness. Both already combine how weak you are and how heavily the exam weights that area."
-              : "."}
-          </p>
+              <p className="mt-3 font-semibold text-stone-900">Top 3 Systems</p>
+              <ul className="list-disc pl-5">
+                {victoryTopSystems.map((row, index) => (
+                  <li key={`victory-system-${row.name}`}>
+                    #{index + 1} {row.name} | {activePriorityMetric === "proi" ? "PROI" : "ROI"}: {" "}
+                    {activePriorityMetric === "proi"
+                      ? formatScore(row.proi)
+                      : hasUsableQbankData(row)
+                        ? formatScore(row.roi)
+                        : "— (insufficient QBank data)"}{" "}
+                    | Weight: {row.blueprintWeight == null ? "—" : formatPercent(row.blueprintWeight)} | Avg % Correct:{" "}
+                    {typeof row.avgPercentCorrect === "number"
+                      ? formatPercentFrom100(row.avgPercentCorrect)
+                      : "— (insufficient QBank data)"}
+                  </li>
+                ))}
+                {victoryTopSystems.length === 0 ? <li>— (insufficient QBank data)</li> : null}
+              </ul>
+            </div>
+          </Card>
 
-          {big3Roi.hasData ? (
-            <div className="space-y-3">
-              <h3 className="text-sm font-semibold text-stone-900">Big-3 (QBank ROI)</h3>
-              <div className="grid gap-3 md:grid-cols-3">
-                <div className="rounded-md border border-stone-200 bg-stone-50/40 p-3 text-sm text-stone-800">
-                  <p className="font-semibold text-stone-900">Medicine</p>
-                  {big3Roi.medicineRow ? (
-                    <p>
-                      ROI:{" "}
-                      {hasUsableQbankData(big3Roi.medicineRow)
-                        ? formatScore(big3Roi.medicineRow.roi)
-                        : "— (insufficient QBank data)"}{" "}
-                      | Avg % Correct:{" "}
-                      {typeof big3Roi.medicineRow.avgPercentCorrect === "number"
-                        ? formatPercentFrom100(big3Roi.medicineRow.avgPercentCorrect)
-                        : "— (insufficient QBank data)"}{" "}
-                      | Weight:{" "}
-                      {big3Roi.medicineRow.blueprintWeight == null
-                        ? "—"
-                        : formatPercent(big3Roi.medicineRow.blueprintWeight)}
-                    </p>
-                  ) : (
-                    <p>Not available</p>
-                  )}
-                </div>
-                <div className="rounded-md border border-stone-200 bg-stone-50/40 p-3 text-sm text-stone-800">
-                  <p className="font-semibold text-stone-900">Top 3 Systems</p>
-                  <ul className="list-disc pl-5">
-                    {big3Roi.topSystems.map((row) => (
-                      <li key={`big3-roi-system-${row.name}`}>
-                        {row.name} (ROI): {hasUsableQbankData(row) ? formatScore(row.roi) : "— (insufficient QBank data)"}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-                <div className="rounded-md border border-stone-200 bg-stone-50/40 p-3 text-sm text-stone-800">
-                  <p className="font-semibold text-stone-900">Biostats + Social</p>
-                  <p>
-                    Biostats ROI:{" "}
-                    {big3Roi.biostatsRow && hasUsableQbankData(big3Roi.biostatsRow)
-                      ? formatScore(big3Roi.biostatsRow.roi)
-                      : "— (insufficient QBank data)"}
-                  </p>
-                  <p>
-                    Social Sciences ROI:{" "}
-                    {big3Roi.socialRow && hasUsableQbankData(big3Roi.socialRow)
-                      ? formatScore(big3Roi.socialRow.roi)
-                      : "— (insufficient QBank data)"}
-                  </p>
-                </div>
+          <Card title="ACHILLES HEEL" className="print-avoid-break">
+            {achillesHeelItem ? (
+              <div className="space-y-2 rounded-md border border-stone-200 bg-stone-50/40 p-3 text-sm text-stone-800">
+                <p className="font-semibold text-stone-900">
+                  {achillesHeelItem.name} ({CATEGORY_LABEL_BY_TYPE[achillesHeelItem.categoryType]})
+                </p>
+                <p>
+                  Rank #
+                  {activePriorityMetric === "proi"
+                    ? (proiRankMap.get(`${achillesHeelItem.categoryType}::${achillesHeelItem.name}`) ?? "—")
+                    : (roiRankMap.get(`${achillesHeelItem.categoryType}::${achillesHeelItem.name}`) ?? "—")} |{" "}
+                  {activePriorityMetric === "proi" ? "PROI" : "ROI"}:{" "}
+                  {activePriorityMetric === "proi"
+                    ? formatScore(achillesHeelItem.proi)
+                    : hasUsableQbankData(achillesHeelItem)
+                      ? formatScore(achillesHeelItem.roi)
+                      : "— (insufficient QBank data)"}{" "}
+                  | Weight: {" "}
+                  {achillesHeelItem.blueprintWeight == null ? "—" : formatPercent(achillesHeelItem.blueprintWeight)} | Avg % Correct:{" "}
+                  {typeof achillesHeelItem.avgPercentCorrect === "number"
+                    ? formatPercentFrom100(achillesHeelItem.avgPercentCorrect)
+                    : "— (insufficient QBank data)"}
+                </p>
+                <p className="text-stone-600">
+                  This item is currently your highest-priority target because it combines exam weight and current
+                  performance gap under the active metric.
+                </p>
+              </div>
+            ) : (
+              <p className="text-sm text-stone-700">— (insufficient QBank data)</p>
+            )}
+          </Card>
+
+          <Card title="WHAT TO STUDY" className="print-avoid-break">
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="rounded-md border border-stone-200 bg-stone-50/40 p-3 text-sm text-stone-800">
+                <p className="font-semibold text-stone-900">Top 3 Subjects</p>
+                <ul className="mt-2 space-y-1">
+                  {whatToStudyTopSubjects.map((row, index) => (
+                    <li key={`study-subject-${row.name}`}>
+                      #{index + 1} {row.name} | {activePriorityMetric === "proi" ? "PROI" : "ROI"}: {" "}
+                      {activePriorityMetric === "proi"
+                        ? formatScore(row.proi)
+                        : hasUsableQbankData(row)
+                          ? formatScore(row.roi)
+                          : "— (insufficient QBank data)"}
+                    </li>
+                  ))}
+                  {whatToStudyTopSubjects.length === 0 ? <li>— (insufficient QBank data)</li> : null}
+                </ul>
+              </div>
+              <div className="rounded-md border border-stone-200 bg-stone-50/40 p-3 text-sm text-stone-800">
+                <p className="font-semibold text-stone-900">Top 3 Systems</p>
+                <ul className="mt-2 space-y-1">
+                  {whatToStudyTopSystems.map((row, index) => (
+                    <li key={`study-system-${row.name}`}>
+                      #{index + 1} {row.name} | {activePriorityMetric === "proi" ? "PROI" : "ROI"}: {" "}
+                      {activePriorityMetric === "proi"
+                        ? formatScore(row.proi)
+                        : hasUsableQbankData(row)
+                          ? formatScore(row.roi)
+                          : "— (insufficient QBank data)"}
+                    </li>
+                  ))}
+                  {whatToStudyTopSystems.length === 0 ? <li>— (insufficient QBank data)</li> : null}
+                </ul>
               </div>
             </div>
-          ) : null}
+          </Card>
+        </>
+      ) : (
+        <>
+          <Card title="Achilles Insight" className="print-avoid-break">
+            <ul className="space-y-4 text-sm text-stone-800">
+              {whatToStudyItems.map((row) => (
+                <li key={`insight-${row.categoryType}-${row.name}`} className="rounded-md border border-stone-200 bg-stone-50/40 p-3">
+                  <p className="font-semibold text-stone-900">
+                    {row.name} ({CATEGORY_LABEL_BY_TYPE[row.categoryType]})
+                  </p>
+                  <p>
+                    Weight: {row.blueprintWeight == null ? "—" : formatPercent(row.blueprintWeight)} | ROI:{" "}
+                    {hasUsableQbankData(row) ? formatScore(row.roi) : "— (insufficient QBank data)"}
+                    {showProiColumn ? ` | PROI: ${row.hasProi ? formatScore(row.proi) : PROI_PLACEHOLDER}` : ""}
+                    {" | "}Avg % Correct:{" "}
+                    {typeof row.avgPercentCorrect === "number"
+                      ? formatPercentFrom100(row.avgPercentCorrect)
+                      : "— (insufficient QBank data)"}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </Card>
 
-          {hasScoreReportData && big3Proi.hasData ? (
-            <div className="space-y-3">
-              <h3 className="text-sm font-semibold text-stone-900">Big-3 (Score Report PROI)</h3>
-              <div className="grid gap-3 md:grid-cols-3">
-                <div className="rounded-md border border-stone-200 bg-stone-50/40 p-3 text-sm text-stone-800">
-                  <p className="font-semibold text-stone-900">Medicine</p>
-                  {big3Proi.medicineRow ? (
-                    <p>
-                      PROI: {formatScore(big3Proi.medicineRow.proi)} | Proxy Weakness:{" "}
-                      {typeof big3Proi.medicineRow.proi === "number" &&
-                      typeof big3Proi.medicineRow.blueprintWeight === "number" &&
-                      big3Proi.medicineRow.blueprintWeight > 0
-                        ? formatPercent(big3Proi.medicineRow.proi / big3Proi.medicineRow.blueprintWeight)
-                        : "Not available"}{" "}
-                      | Weight:{" "}
-                      {big3Proi.medicineRow.blueprintWeight == null
-                        ? "—"
-                        : formatPercent(big3Proi.medicineRow.blueprintWeight)}
-                    </p>
-                  ) : (
-                    <p>Not available</p>
-                  )}
-                </div>
-                <div className="rounded-md border border-stone-200 bg-stone-50/40 p-3 text-sm text-stone-800">
-                  <p className="font-semibold text-stone-900">Top 3 Systems</p>
+          <Card title="What to study?" className="print-avoid-break">
+            <ul className="space-y-4 text-sm text-stone-800">
+              {whatToStudyItems.map((row) => (
+                <li key={`study-${row.categoryType}-${row.name}`} className="rounded-md border border-stone-200 bg-stone-50/40 p-3">
+                  <p className="font-semibold text-stone-900">
+                    {row.name} ({CATEGORY_LABEL_BY_TYPE[row.categoryType]})
+                    {big3RoiKeySet.has(`${row.categoryType}::${row.name}`) ? (
+                      <span className="ml-2 inline-flex items-center rounded border border-stone-300 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-stone-600">
+                        In Big-3
+                      </span>
+                    ) : null}
+                  </p>
                   <ul className="list-disc pl-5">
-                    {big3Proi.topSystems.map((row) => (
-                      <li key={`big3-proi-system-${row.name}`}>
-                        {row.name} (PROI): {formatScore(row.proi)}
-                      </li>
+                    {buildWhatToStudyBullets(row, {
+                      roiRank: roiRankMap.get(`${row.categoryType}::${row.name}`) ?? 0,
+                      proiRank: proiRankMap.get(`${row.categoryType}::${row.name}`),
+                      avgRank: avgRankMap.get(`${row.categoryType}::${row.name}`),
+                    }, hasScoreReportData).map((bullet) => (
+                      <li key={`${row.name}-study-${bullet}`}>{bullet}</li>
                     ))}
                   </ul>
-                </div>
-                <div className="rounded-md border border-stone-200 bg-stone-50/40 p-3 text-sm text-stone-800">
-                  <p className="font-semibold text-stone-900">Biostats + Social</p>
-                  <p>Biostats PROI: {formatScore(big3Proi.biostatsRow?.proi ?? 0)}</p>
-                  <p>Social Sciences PROI: {formatScore(big3Proi.socialRow?.proi ?? 0)}</p>
-                </div>
-              </div>
-            </div>
-          ) : null}
-        </Card>
-      ) : null}
-
-      {unmappedGroups.length > 0 ? (
+                </li>
+              ))}
+            </ul>
+          </Card>
+        </>
+      )}
+{unmappedGroups.length > 0 ? (
         <Card title="Unmapped Categories" className="print-avoid-break">
           <div className="overflow-x-auto">
             <table className="min-w-full border-collapse text-sm">
@@ -1898,5 +1930,7 @@ export default function ResultsPage() {
     </section>
   );
 }
+
+
 
 
