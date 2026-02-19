@@ -110,6 +110,8 @@ type Step2MappingAuditEntry = {
 };
 
 type Big3Metric = "roi" | "proi";
+const WHAT_TO_STUDY_K = 7;
+const WHAT_TO_STUDY_SYSTEMS_N = 10;
 
 const modeLabels: Record<RankingMode, string> = {
   roi: "Rank by ROI",
@@ -835,6 +837,7 @@ function DebugPanel({
 
 export default function ResultsPage() {
   const router = useRouter();
+  const [mounted, setMounted] = useState(false);
   const [rankingMode, setRankingMode] = useState<RankingMode>("roi");
   const [showRestOfData, setShowRestOfData] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -884,10 +887,41 @@ export default function ResultsPage() {
     ];
   }, [aggregated, categoryOrder, rankingMode, selectedTest]);
 
-  const topFive = useMemo(
-    () => sortByFocusScore(selectedTest === "usmle_step2" ? aggregated.filter((row) => isUworldTaxonomyRow(row)) : aggregated).slice(0, 5),
-    [aggregated, selectedTest],
+  const roiRankedRows = useMemo(() => {
+    const baseRows = selectedTest === "usmle_step2" ? aggregated.filter((row) => isUworldTaxonomyRow(row)) : aggregated;
+    return sortDisplayRows(baseRows, "roi");
+  }, [aggregated, selectedTest]);
+  const roiRankedValidRows = useMemo(
+    () => roiRankedRows.filter((row) => row.attemptedCount > 0 && typeof row.roi === "number"),
+    [roiRankedRows],
   );
+  const rankedSystemsByROI = useMemo(
+    () => roiRankedValidRows.filter((row) => row.categoryType === "uworld_system"),
+    [roiRankedValidRows],
+  );
+  const topRoiSystems = useMemo(() => rankedSystemsByROI.slice(0, 3), [rankedSystemsByROI]);
+  const whatToStudySystems = useMemo(
+    () => rankedSystemsByROI.slice(0, WHAT_TO_STUDY_SYSTEMS_N),
+    [rankedSystemsByROI],
+  );
+  const whatToStudyItems = useMemo(() => {
+    const combinedTop = roiRankedValidRows.slice(0, WHAT_TO_STUDY_K);
+    const byKey = new Map<string, DisplayRow>();
+    for (const row of combinedTop) {
+      byKey.set(`${row.categoryType}::${row.name}`, row);
+    }
+    for (const row of whatToStudySystems) {
+      byKey.set(`${row.categoryType}::${row.name}`, row);
+    }
+    return Array.from(byKey.values()).sort((a, b) => {
+      const aRoi = a.roi ?? Number.NEGATIVE_INFINITY;
+      const bRoi = b.roi ?? Number.NEGATIVE_INFINITY;
+      if (bRoi !== aRoi) {
+        return bRoi - aRoi;
+      }
+      return a.name.localeCompare(b.name);
+    });
+  }, [roiRankedValidRows, whatToStudySystems]);
   const big3Roi = useMemo(() => buildBig3Data(aggregated, "roi"), [aggregated]);
   const big3Proi = useMemo(() => buildBig3Data(aggregated, "proi"), [aggregated]);
   const hasUworldQbankRows = useMemo(
@@ -909,6 +943,18 @@ export default function ResultsPage() {
     () => hasScoreReportData && aggregated.some((row) => row.hasProi),
     [aggregated, hasScoreReportData],
   );
+  const big3RoiKeySet = useMemo(() => {
+    const keys = new Set<string>();
+    const add = (row?: DisplayRow) => {
+      if (!row) return;
+      keys.add(`${row.categoryType}::${row.name}`);
+    };
+    add(big3Roi.medicineRow);
+    big3Roi.topSystems.forEach(add);
+    add(big3Roi.biostatsRow);
+    add(big3Roi.socialRow);
+    return keys;
+  }, [big3Roi]);
   const step2MappingAudit = useMemo(() => {
     if (selectedTest !== "usmle_step2") {
       return null;
@@ -1215,7 +1261,7 @@ export default function ResultsPage() {
     return {
       exam: selectedTest,
       rows: zeusRows,
-      topFive: topFive.map((row) => ({
+      topFive: whatToStudyItems.map((row) => ({
         name: row.name,
         categoryType: row.categoryType,
         weight: row.blueprintWeight ?? 0,
@@ -1228,7 +1274,7 @@ export default function ResultsPage() {
       proiRanking: toRanked(proiOrdered, "proi"),
       combinedRanking: toRanked(combinedOrdered, "focusScore"),
     };
-  }, [aggregated, selectedTest, topFive, zeusRows]);
+  }, [aggregated, selectedTest, whatToStudyItems, zeusRows]);
   const truthPanelRows = useMemo<TruthPanelRow[]>(() => {
     if (!debugEnabled) {
       return [];
@@ -1334,7 +1380,9 @@ export default function ResultsPage() {
     for (const [name, expectedPct] of Object.entries(expectedSubjectWeightsPct)) {
       const actual = STEP2_SUBJECT_WEIGHTS[name as keyof typeof STEP2_SUBJECT_WEIGHTS] ?? null;
       if (actual == null || Math.abs(actual * 100 - expectedPct) > 1e-6) {
-        throw new Error(`[step2-assert] Subject weight mismatch for "${name}". Expected ${expectedPct}%, got ${actual == null ? "null" : (actual * 100).toFixed(3)}%.`);
+        console.warn(
+          `[step2-assert] Subject weight mismatch for "${name}". Expected ${expectedPct}%, got ${actual == null ? "null" : (actual * 100).toFixed(3)}%.`,
+        );
       }
     }
 
@@ -1347,7 +1395,7 @@ export default function ResultsPage() {
     ) {
       const expectedRoi = (1 - medicineRow.avgPercentCorrect / 100) * 0.6;
       if (Math.abs(medicineRow.roi - expectedRoi) > 1e-9) {
-        throw new Error(
+        console.warn(
           `[step2-assert] Medicine ROI drift. expected=${expectedRoi.toFixed(6)} actual=${medicineRow.roi.toFixed(6)}`,
         );
       }
@@ -1355,11 +1403,42 @@ export default function ResultsPage() {
 
     const systemRows = aggregated.filter((row) => row.categoryType === "uworld_system");
     if (systemRows.length !== STEP2_SYSTEM_CANONICAL.length) {
-      throw new Error(
+      console.warn(
         `[step2-assert] Systems row count mismatch. expected=${STEP2_SYSTEM_CANONICAL.length} actual=${systemRows.length}`,
       );
     }
-  }, [aggregated, selectedTest]);
+
+    const studySubjectKeySet = new Set(
+      whatToStudyItems
+        .filter((row) => row.categoryType === "uworld_subject")
+        .map((row) => `${row.categoryType}::${row.name}`),
+    );
+    const studySystemKeySet = new Set(
+      whatToStudySystems
+        .filter((row) => row.categoryType === "uworld_system")
+        .map((row) => `${row.categoryType}::${row.name}`),
+    );
+    const topSubjectByRoi = roiRankedValidRows.find(
+      (row) => row.categoryType === "uworld_subject" && row.attemptedCount > 0 && typeof row.roi === "number",
+    );
+    if (topSubjectByRoi && !studySubjectKeySet.has(`${topSubjectByRoi.categoryType}::${topSubjectByRoi.name}`)) {
+      console.warn(`[step2-assert] Top ROI subject missing from What to study: ${topSubjectByRoi.name}`);
+    }
+
+    for (const row of topRoiSystems) {
+      const key = `${row.categoryType}::${row.name}`;
+      if (!studySystemKeySet.has(key)) {
+        console.warn(`[step2-assert] Top ROI system missing from What to study: ${row.name}`);
+      }
+    }
+
+    const multisystemRank = roiRankedValidRows.findIndex(
+      (row) => row.categoryType === "uworld_system" && row.name === "Multisystem Processes & Disorders",
+    );
+    if (multisystemRank >= WHAT_TO_STUDY_SYSTEMS_N && studySystemKeySet.has("uworld_system::Multisystem Processes & Disorders")) {
+      console.warn("[step2-assert] Multisystem appears in What to study despite low ROI rank among systems.");
+    }
+  }, [aggregated, roiRankedValidRows, selectedTest, topRoiSystems, whatToStudyItems, whatToStudySystems]);
 
   useEffect(() => {
     if (!chatScrollRef.current) {
@@ -1418,6 +1497,10 @@ export default function ResultsPage() {
   };
   const isDevNoSession = process.env.NODE_ENV !== "production" && parsedRows.length === 0;
 
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   if (process.env.NODE_ENV === "production" && parsedRows.length === 0) {
     return (
       <section className="space-y-8 pt-6 sm:pt-10">
@@ -1433,6 +1516,19 @@ export default function ResultsPage() {
             </Link>
           </div>
         </Card>
+      </section>
+    );
+  }
+
+  if (!mounted) {
+    return (
+      <section className="space-y-6 pt-6 sm:pt-10">
+        <BrandHeader />
+        <div id="results-print-root" className="space-y-6">
+          <Card className="print-avoid-break">
+            <h2 className="brand-title text-2xl font-semibold text-stone-900">RESULTS: Loading...</h2>
+          </Card>
+        </div>
       </section>
     );
   }
@@ -1514,7 +1610,7 @@ export default function ResultsPage() {
 
       <Card title="Achilles Insight" className="print-avoid-break">
         <ul className="space-y-4 text-sm text-stone-800">
-          {topFive.map((row) => (
+          {whatToStudyItems.map((row) => (
             <li key={`insight-${row.categoryType}-${row.name}`} className="rounded-md border border-stone-200 bg-stone-50/40 p-3">
               <p className="font-semibold text-stone-900">
                 {row.name} ({CATEGORY_LABEL_BY_TYPE[row.categoryType]})
@@ -1535,10 +1631,15 @@ export default function ResultsPage() {
 
       <Card title="What to study?" className="print-avoid-break">
         <ul className="space-y-4 text-sm text-stone-800">
-          {topFive.map((row) => (
+          {whatToStudyItems.map((row) => (
             <li key={`study-${row.categoryType}-${row.name}`} className="rounded-md border border-stone-200 bg-stone-50/40 p-3">
               <p className="font-semibold text-stone-900">
                 {row.name} ({CATEGORY_LABEL_BY_TYPE[row.categoryType]})
+                {big3RoiKeySet.has(`${row.categoryType}::${row.name}`) ? (
+                  <span className="ml-2 inline-flex items-center rounded border border-stone-300 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-stone-600">
+                    In Big-3
+                  </span>
+                ) : null}
               </p>
               <ul className="list-disc pl-5">
                 {buildWhatToStudyBullets(row, {

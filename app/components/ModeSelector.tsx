@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { clearUploadSession, getUploadSession } from "../lib/session";
 import {
+  DEFAULT_TEST_TYPE,
   getSelectedTestFromLocalStorage,
   getTestLabel,
   isTestType,
@@ -19,13 +20,15 @@ function resolveTestType(): TestType {
 export function ModeSelector() {
   const router = useRouter();
   const pathname = usePathname();
-  const [testType, setTestType] = useState<TestType>(() => resolveTestType());
+  const [mounted, setMounted] = useState(false);
+  const [testType, setTestType] = useState<TestType>(DEFAULT_TEST_TYPE);
 
   useEffect(() => {
     const sync = () => {
       setTestType(resolveTestType());
     };
 
+    setMounted(true);
     sync();
     window.addEventListener("focus", sync);
     window.addEventListener("storage", sync);
@@ -41,7 +44,7 @@ export function ModeSelector() {
     <label className="settings-link mode-select-wrap">
       <span className="mode-select-label">Mode</span>
       <select
-        value={testType}
+        value={mounted ? testType : DEFAULT_TEST_TYPE}
         onChange={(event) => {
           const nextValue = event.target.value;
           if (!isTestType(nextValue) || nextValue === testType) {
