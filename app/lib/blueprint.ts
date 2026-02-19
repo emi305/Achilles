@@ -32,8 +32,8 @@ export const CATEGORY_LABEL_BY_TYPE: Record<CategoryType, string> = {
   clinical_presentation: "Clinical Presentation",
   system: "Systems",
   physician_task: "Physician Tasks",
-  uworld_subject: "UWorld Subject",
-  uworld_system: "UWorld System",
+  uworld_subject: "Subject",
+  uworld_system: "System",
 };
 
 export const EXAM_LABEL: Record<TestType, string> = {

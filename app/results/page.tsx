@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Alert } from "../components/Alert";
 import { BrandHeader } from "../components/BrandHeader";
 import { Card } from "../components/Card";
-import { computeAvgPercentCorrect } from "../lib/avgCorrect";
+import { computeAccuracy, computeAvgPercentCorrect } from "../lib/avgCorrect";
 import { CATEGORY_LABEL_BY_TYPE, getCategoryOrderForTest } from "../lib/blueprint";
 import {
   clearUploadSession,
@@ -16,21 +16,50 @@ import {
   subscribeUploadSession,
 } from "../lib/session";
 import { DEFAULT_TEST_TYPE, getTestLabel } from "../lib/testSelection";
-import { USMLE_STEP2_SUBJECT_WEIGHTS, USMLE_STEP2_SYSTEM_WEIGHTS } from "../lib/usmleStep2Weights";
+import {
+  STEP2_SUBJECT_CANONICAL,
+  STEP2_SUBJECT_WEIGHTS,
+  STEP2_SYSTEM_CANONICAL,
+  STEP2_SYSTEM_WEIGHTS,
+  assertStep2CanonicalWeights,
+  canonicalizeSubjectLabel,
+  canonicalizeSystemLabel,
+  type Step2SubjectCanonical,
+  type Step2SystemCanonical,
+} from "../lib/usmleStep2Canonical";
 import type { CategoryType, ParsedRow, TestType, ZeusContext, ZeusContextRow } from "../lib/types";
-import { getProiScore, getRoiScore, type RankingMode } from "../lib/priority";
+import { getProiScore, type RankingMode } from "../lib/priority";
 
 type DisplayRow = {
   categoryType: CategoryType;
   name: string;
-  weight: number;
-  roi: number;
+  blueprintWeight: number | null;
+  roi: number | null;
   proi: number;
   hasRoi: boolean;
   hasProi: boolean;
   avgCorrect?: number;
+  avgPercentCorrect?: number | null;
+  qbankCorrectSum: number;
+  qbankIncorrectSum: number;
+  attemptedCount: number;
+  usageWeight: number | null;
   weaknessForSort: number;
   focusScore: number;
+};
+
+type TruthPanelRow = {
+  displayName: string;
+  sourceType: string;
+  blueprintWeightUsed: number | null;
+  usageWeightUsed: number | null;
+  correctCount: number;
+  incorrectCount: number;
+  attempted: number;
+  accuracyComputed: number | null;
+  avgPercentDisplayed: number | null;
+  avgPercentComputed: number | null;
+  drift: number | null;
 };
 
 type TableSection = {
@@ -42,16 +71,20 @@ type TableSection = {
 type AccumulatorRow = {
   categoryType: CategoryType;
   name: string;
-  weight: number;
-  roi: number;
+  blueprintWeight: number | null;
   proi: number;
   hasRoi: boolean;
   hasProi: boolean;
   qbankCorrectSum: number;
   qbankIncorrectSum: number;
-  qbankTotalSum: number;
-  qbankAccuracySum: number;
-  qbankAccuracyCount: number;
+};
+
+type AggregationBucket = {
+  key: string;
+  categoryType: CategoryType;
+  name: string;
+  blueprintWeight: number | null;
+  reason: "mapped" | "unmapped_attempted";
 };
 
 type UnmappedRowGroup = {
@@ -60,6 +93,20 @@ type UnmappedRowGroup = {
   source: string;
   count: number;
   examples: string[];
+};
+
+type Step2MappingAuditEntry = {
+  rawLabel: string;
+  parsedCategoryType: CategoryType;
+  mappedSubject: Step2SubjectCanonical;
+  mappedSystem: Step2SystemCanonical;
+  subjectReason: string;
+  systemReason: string;
+  subjectUnmapped: boolean;
+  systemUnmapped: boolean;
+  attempted: number;
+  correct: number | null;
+  incorrectCount: number | null;
 };
 
 type Big3Metric = "roi" | "proi";
@@ -88,8 +135,16 @@ function formatPercent(value: number) {
   return `${round2(value * 100).toFixed(1)}%`;
 }
 
+function formatPercentFrom100(value: number) {
+  return `${round2(value).toFixed(1)}%`;
+}
+
 function formatScore(value: number) {
   return value.toFixed(3);
+}
+
+function hasUsableQbankData(row: DisplayRow): row is DisplayRow & { roi: number; avgPercentCorrect: number } {
+  return row.attemptedCount > 0 && typeof row.avgPercentCorrect === "number" && typeof row.roi === "number";
 }
 
 function isUworldTaxonomyRow(row: ParsedRow | DisplayRow) {
@@ -97,8 +152,8 @@ function isUworldTaxonomyRow(row: ParsedRow | DisplayRow) {
 }
 
 function buildBig3Data(rows: DisplayRow[], metric: Big3Metric) {
-  const subjectType: CategoryType = metric === "roi" ? "uworld_subject" : "discipline";
-  const systemType: CategoryType = metric === "roi" ? "uworld_system" : "system";
+  const subjectType: CategoryType = "uworld_subject";
+  const systemType: CategoryType = "uworld_system";
   const metricRows = rows.filter((row) =>
     metric === "roi"
       ? row.categoryType === subjectType || row.categoryType === systemType
@@ -106,13 +161,13 @@ function buildBig3Data(rows: DisplayRow[], metric: Big3Metric) {
   );
 
   const medicineRow =
-    metricRows.find((row) => row.categoryType === subjectType && row.name === "Medicine (IM)") ??
+    metricRows.find((row) => row.categoryType === subjectType && row.name === "Medicine") ??
     metricRows.find((row) => row.categoryType === subjectType);
   const topSystems = metricRows
     .filter((row) => row.categoryType === systemType)
     .sort((a, b) => {
-      const aMetric = metric === "roi" ? a.roi : a.proi;
-      const bMetric = metric === "roi" ? b.roi : b.proi;
+      const aMetric = metric === "roi" ? (a.roi ?? Number.NEGATIVE_INFINITY) : a.proi;
+      const bMetric = metric === "roi" ? (b.roi ?? Number.NEGATIVE_INFINITY) : b.proi;
       return bMetric - aMetric;
     })
     .slice(0, 3);
@@ -143,7 +198,8 @@ function withUsmleCanonicalCoverage(rows: DisplayRow[], selectedTest: TestType):
   }
   const filled = [...rows];
 
-  for (const [name, weight] of Object.entries(USMLE_STEP2_SUBJECT_WEIGHTS)) {
+  for (const name of STEP2_SUBJECT_CANONICAL) {
+    const weight = STEP2_SUBJECT_WEIGHTS[name];
     const key = `uworld_subject::${name}`;
     if (byKey.has(key)) {
       continue;
@@ -151,18 +207,24 @@ function withUsmleCanonicalCoverage(rows: DisplayRow[], selectedTest: TestType):
     filled.push({
       categoryType: "uworld_subject",
       name,
-      weight,
+      blueprintWeight: weight,
       roi: 0,
       proi: 0,
-      hasRoi: true,
+      hasRoi: false,
       hasProi: false,
       avgCorrect: undefined,
+      avgPercentCorrect: null,
+      qbankCorrectSum: 0,
+      qbankIncorrectSum: 0,
+      attemptedCount: 0,
+      usageWeight: null,
       weaknessForSort: 0,
       focusScore: 0,
     });
   }
 
-  for (const [name, weight] of Object.entries(USMLE_STEP2_SYSTEM_WEIGHTS)) {
+  for (const name of STEP2_SYSTEM_CANONICAL) {
+    const weight = STEP2_SYSTEM_WEIGHTS[name];
     const key = `uworld_system::${name}`;
     if (byKey.has(key)) {
       continue;
@@ -170,12 +232,17 @@ function withUsmleCanonicalCoverage(rows: DisplayRow[], selectedTest: TestType):
     filled.push({
       categoryType: "uworld_system",
       name,
-      weight,
+      blueprintWeight: weight,
       roi: 0,
       proi: 0,
-      hasRoi: true,
+      hasRoi: false,
       hasProi: false,
       avgCorrect: undefined,
+      avgPercentCorrect: null,
+      qbankCorrectSum: 0,
+      qbankIncorrectSum: 0,
+      attemptedCount: 0,
+      usageWeight: null,
       weaknessForSort: 0,
       focusScore: 0,
     });
@@ -185,27 +252,34 @@ function withUsmleCanonicalCoverage(rows: DisplayRow[], selectedTest: TestType):
 }
 
 function sortDisplayRows(rows: DisplayRow[], mode: RankingMode): DisplayRow[] {
-  return [...rows].sort((a, b) => {
+  const sorted = [...rows].sort((a, b) => {
     if (mode === "avg") {
       const aAvg = typeof a.avgCorrect === "number" ? a.avgCorrect : Number.POSITIVE_INFINITY;
       const bAvg = typeof b.avgCorrect === "number" ? b.avgCorrect : Number.POSITIVE_INFINITY;
       if (aAvg !== bAvg) {
         return aAvg - bAvg;
       }
-      if (b.weight !== a.weight) {
-        return b.weight - a.weight;
+      const aWeight = a.blueprintWeight ?? Number.NEGATIVE_INFINITY;
+      const bWeight = b.blueprintWeight ?? Number.NEGATIVE_INFINITY;
+      if (bWeight !== aWeight) {
+        return bWeight - aWeight;
       }
       return a.name.localeCompare(b.name);
     }
 
-    if (b.roi !== a.roi) {
-      return b.roi - a.roi;
+    const aRoi = a.roi ?? Number.NEGATIVE_INFINITY;
+    const bRoi = b.roi ?? Number.NEGATIVE_INFINITY;
+    if (bRoi !== aRoi) {
+      return bRoi - aRoi;
     }
-    if (b.weight !== a.weight) {
-      return b.weight - a.weight;
+    const aWeight = a.blueprintWeight ?? Number.NEGATIVE_INFINITY;
+    const bWeight = b.blueprintWeight ?? Number.NEGATIVE_INFINITY;
+    if (bWeight !== aWeight) {
+      return bWeight - aWeight;
     }
     return a.name.localeCompare(b.name);
   });
+  return sorted;
 }
 
 function sortByFocusScore(rows: DisplayRow[]): DisplayRow[] {
@@ -216,8 +290,10 @@ function sortByFocusScore(rows: DisplayRow[]): DisplayRow[] {
     if (b.proi !== a.proi) {
       return b.proi - a.proi;
     }
-    if (b.roi !== a.roi) {
-      return b.roi - a.roi;
+    const aRoi = a.roi ?? Number.NEGATIVE_INFINITY;
+    const bRoi = b.roi ?? Number.NEGATIVE_INFINITY;
+    if (bRoi !== aRoi) {
+      return bRoi - aRoi;
     }
     if (b.weaknessForSort !== a.weaknessForSort) {
       return b.weaknessForSort - a.weaknessForSort;
@@ -226,81 +302,193 @@ function sortByFocusScore(rows: DisplayRow[]): DisplayRow[] {
   });
 }
 
-function finalizeAccumulator(value: AccumulatorRow): DisplayRow {
-  let avgCorrect: number | undefined;
+function resolveAggregationBucket(row: ParsedRow, hasAttemptedCounts: boolean): AggregationBucket | null {
+  const hasMappedBucket = !row.unmapped;
+  if (hasMappedBucket) {
+    const name = row.name;
+    return {
+      key: `${row.categoryType}::${name}`,
+      categoryType: row.categoryType,
+      name,
+      blueprintWeight: row.weight ?? null,
+      reason: "mapped",
+    };
+  }
 
-  const computedPercent = computeAvgPercentCorrect(value.qbankCorrectSum, value.qbankIncorrectSum);
-  if (typeof computedPercent === "number") {
-    avgCorrect = clamp01(computedPercent / 100);
-  } else if (value.qbankAccuracyCount > 0) {
-    avgCorrect = clamp01(value.qbankAccuracySum / value.qbankAccuracyCount);
+  if (hasAttemptedCounts) {
+    const name = `Unmapped: ${row.name}`;
+    return {
+      key: `${row.categoryType}::${name}`,
+      categoryType: row.categoryType,
+      name,
+      blueprintWeight: row.weight ?? null,
+      reason: "unmapped_attempted",
+    };
+  }
+
+  return null;
+}
+
+function getStep2BucketsForRow(row: ParsedRow, hasAttemptedCounts: boolean): AggregationBucket[] {
+  const rawLabel = row.originalName ?? row.name;
+  const systemResult = canonicalizeSystemLabel(rawLabel);
+  const subjectResult = canonicalizeSubjectLabel(rawLabel, { systemCanonical: systemResult.canonical });
+  const subjectWeight = STEP2_SUBJECT_WEIGHTS[subjectResult.canonical];
+  const systemWeight = STEP2_SYSTEM_WEIGHTS[systemResult.canonical];
+  const buckets: AggregationBucket[] = [
+    {
+      key: `uworld_subject::${subjectResult.canonical}`,
+      categoryType: "uworld_subject",
+      name: subjectResult.canonical,
+      blueprintWeight: subjectWeight ?? null,
+      reason: subjectResult.unmapped ? "unmapped_attempted" : "mapped",
+    },
+    {
+      key: `uworld_system::${systemResult.canonical}`,
+      categoryType: "uworld_system",
+      name: systemResult.canonical,
+      blueprintWeight: systemWeight ?? null,
+      reason: systemResult.unmapped ? "unmapped_attempted" : "mapped",
+    },
+  ];
+  if (!hasAttemptedCounts) {
+    return buckets;
+  }
+  return buckets;
+}
+
+function finalizeAccumulator(value: AccumulatorRow, usageWeight: number | null): DisplayRow {
+  const attemptedCount = value.qbankCorrectSum + value.qbankIncorrectSum;
+  const avgPercentCorrect = computeAvgPercentCorrect(value.qbankCorrectSum, value.qbankIncorrectSum);
+  const computedAccuracy = computeAccuracy(value.qbankCorrectSum, value.qbankIncorrectSum);
+  const avgCorrect = typeof computedAccuracy === "number" ? clamp01(computedAccuracy) : undefined;
+
+  if (process.env.NODE_ENV !== "production") {
+    if (!Number.isInteger(attemptedCount) || attemptedCount < 0) {
+      throw new Error(`[avg-correct] invalid attempted count for "${value.name}": ${attemptedCount}`);
+    }
+    if (computedAccuracy != null && (computedAccuracy < 0 || computedAccuracy > 1)) {
+      throw new Error(`[avg-correct] invalid accuracy for "${value.name}": ${computedAccuracy}`);
+    }
+    if (avgPercentCorrect != null && (avgPercentCorrect < 0 || avgPercentCorrect > 100)) {
+      throw new Error(`[avg-correct] invalid percent for "${value.name}": ${avgPercentCorrect}`);
+    }
+    if (attemptedCount > 0 && avgPercentCorrect != null) {
+      const expected = (value.qbankCorrectSum / attemptedCount) * 100;
+      if (Math.abs(expected - avgPercentCorrect) > 0.05) {
+        throw new Error(
+          `[avg-correct] denominator drift for "${value.name}": expected=${expected.toFixed(3)} actual=${avgPercentCorrect.toFixed(3)}`,
+        );
+      }
+    }
   }
 
   const weaknessForSort = typeof avgCorrect === "number" ? clamp01(1 - avgCorrect) : 0;
-  const weaknessWeighted = weaknessForSort * value.weight;
-  const focusScore = value.roi + value.proi + weaknessWeighted;
+  const weaknessWeighted = weaknessForSort * (value.blueprintWeight ?? 0);
+  const roiWeight = value.blueprintWeight ?? usageWeight ?? 0;
+  const roi = typeof computedAccuracy === "number" ? (1 - computedAccuracy) * roiWeight : null;
+  const focusScore = (roi ?? 0) + value.proi + weaknessWeighted;
 
   return {
     categoryType: value.categoryType,
     name: value.name,
-    weight: value.weight,
-    roi: value.roi,
+    blueprintWeight: value.blueprintWeight,
+    roi,
     proi: value.proi,
     hasRoi: value.hasRoi,
     hasProi: value.hasProi,
     avgCorrect,
+    avgPercentCorrect,
+    qbankCorrectSum: value.qbankCorrectSum,
+    qbankIncorrectSum: value.qbankIncorrectSum,
+    attemptedCount,
+    usageWeight,
     weaknessForSort,
     focusScore,
   };
 }
 
-function aggregateRows(rows: ParsedRow[]): DisplayRow[] {
+function aggregateRows(rows: ParsedRow[], selectedTest: TestType): DisplayRow[] {
   const byKey = new Map<string, AccumulatorRow>();
   const warnedUsageMismatch = new Set<string>();
 
   for (const row of rows) {
-    if (row.unmapped || row.weight == null) {
+    const hasCountAccuracy =
+      typeof row.correct === "number" && typeof row.incorrectCount === "number" && row.incorrectCount >= 0;
+    const isStep2UworldRow =
+      selectedTest === "usmle_step2" && (row.inputSource === "uworld_qbank" || isUworldTaxonomyRow(row));
+    const buckets = isStep2UworldRow ? getStep2BucketsForRow(row, hasCountAccuracy) : [resolveAggregationBucket(row, hasCountAccuracy)].filter(Boolean) as AggregationBucket[];
+    if (buckets.length === 0) {
       continue;
     }
-    const key = `${row.categoryType}::${row.name}`;
-    const roi = getRoiScore(row);
-    const hasProi = typeof row.proxyWeakness === "number" || typeof row.proi === "number";
-    const proi =
-      typeof row.proxyWeakness === "number"
-        ? row.proxyWeakness * row.weight
-        : hasProi
-          ? getProiScore(row)
-          : 0;
-    const hasQbankAccuracy = typeof row.accuracy === "number";
 
-    const existing = byKey.get(key);
-    if (!existing) {
-      const created: AccumulatorRow = {
-        categoryType: row.categoryType,
-        name: row.name,
-        weight: row.weight,
-        roi,
-        proi,
-        hasRoi: hasQbankAccuracy || roi > 0,
-        hasProi,
-        qbankCorrectSum: 0,
-        qbankIncorrectSum: 0,
-        qbankTotalSum: 0,
-        qbankAccuracySum: 0,
-        qbankAccuracyCount: 0,
-      };
+    const hasProi = typeof row.proxyWeakness === "number" || typeof row.proi === "number";
+    const rowProi = hasProi ? getProiScore(row) : 0;
+    const hasQbankAccuracy = hasCountAccuracy;
+
+    for (const bucket of buckets) {
+      const existing = byKey.get(bucket.key);
+      if (!existing) {
+        const created: AccumulatorRow = {
+          categoryType: bucket.categoryType,
+          name: bucket.name,
+          blueprintWeight: bucket.blueprintWeight,
+          proi: rowProi,
+          hasRoi: hasQbankAccuracy,
+          hasProi,
+          qbankCorrectSum: 0,
+          qbankIncorrectSum: 0,
+        };
+
+        if (typeof row.correct === "number" && typeof row.incorrectCount === "number" && row.incorrectCount >= 0) {
+          created.qbankCorrectSum += row.correct;
+          created.qbankIncorrectSum += row.incorrectCount;
+        } else if (
+          process.env.NODE_ENV !== "production" &&
+          (typeof row.correct === "number" || typeof row.accuracy === "number")
+        ) {
+          console.warn(`[avg-correct] missing incorrectCount for "${row.name}" in aggregation path.`);
+        }
+
+        if (
+          process.env.NODE_ENV !== "production" &&
+          typeof row.usageUsed === "number" &&
+          typeof row.correct === "number" &&
+          typeof row.incorrectCount === "number"
+        ) {
+          const omitted = typeof row.omittedCount === "number" ? row.omittedCount : 0;
+          const expectedUsage = row.correct + row.incorrectCount + omitted;
+          if (row.usageUsed !== expectedUsage) {
+            const warnKey = bucket.key;
+            if (!warnedUsageMismatch.has(warnKey)) {
+              warnedUsageMismatch.add(warnKey);
+              console.warn(
+                `[avg-correct] usage mismatch for "${row.name}": usageUsed=${row.usageUsed}, correct+incorrect+omitted=${expectedUsage}`,
+              );
+            }
+          }
+        }
+
+        byKey.set(bucket.key, created);
+        continue;
+      }
+
+      existing.blueprintWeight =
+        typeof existing.blueprintWeight === "number" && typeof bucket.blueprintWeight === "number"
+          ? Math.max(existing.blueprintWeight, bucket.blueprintWeight)
+          : existing.blueprintWeight ?? bucket.blueprintWeight ?? null;
+      existing.proi += rowProi;
+      existing.hasRoi = existing.hasRoi || hasQbankAccuracy;
+      existing.hasProi = existing.hasProi || hasProi;
 
       if (typeof row.correct === "number" && typeof row.incorrectCount === "number" && row.incorrectCount >= 0) {
-        created.qbankCorrectSum += row.correct;
-        created.qbankIncorrectSum += row.incorrectCount;
-        created.qbankTotalSum += row.correct + row.incorrectCount;
-      } else if (typeof row.correct === "number" && typeof row.total === "number" && row.total > 0) {
-        created.qbankCorrectSum += row.correct;
-        created.qbankIncorrectSum += Math.max(0, row.total - row.correct);
-        created.qbankTotalSum += row.total;
-      } else if (typeof row.accuracy === "number") {
-        created.qbankAccuracySum += clamp01(row.accuracy);
-        created.qbankAccuracyCount += 1;
+        existing.qbankCorrectSum += row.correct;
+        existing.qbankIncorrectSum += row.incorrectCount;
+      } else if (
+        process.env.NODE_ENV !== "production" &&
+        (typeof row.correct === "number" || typeof row.accuracy === "number")
+      ) {
+        console.warn(`[avg-correct] missing incorrectCount for "${row.name}" in aggregation path.`);
       }
 
       if (
@@ -312,60 +500,36 @@ function aggregateRows(rows: ParsedRow[]): DisplayRow[] {
         const omitted = typeof row.omittedCount === "number" ? row.omittedCount : 0;
         const expectedUsage = row.correct + row.incorrectCount + omitted;
         if (row.usageUsed !== expectedUsage) {
-          const warnKey = `${row.categoryType}::${row.name}`;
-          if (!warnedUsageMismatch.has(warnKey)) {
-            warnedUsageMismatch.add(warnKey);
+          if (!warnedUsageMismatch.has(bucket.key)) {
+            warnedUsageMismatch.add(bucket.key);
             console.warn(
               `[avg-correct] usage mismatch for "${row.name}": usageUsed=${row.usageUsed}, correct+incorrect+omitted=${expectedUsage}`,
             );
           }
         }
       }
-
-      byKey.set(key, created);
-      continue;
-    }
-
-    existing.weight = Math.max(existing.weight, row.weight);
-    existing.roi += roi;
-    existing.proi += proi;
-    existing.hasRoi = existing.hasRoi || hasQbankAccuracy || roi > 0;
-    existing.hasProi = existing.hasProi || hasProi;
-
-    if (typeof row.correct === "number" && typeof row.incorrectCount === "number" && row.incorrectCount >= 0) {
-      existing.qbankCorrectSum += row.correct;
-      existing.qbankIncorrectSum += row.incorrectCount;
-      existing.qbankTotalSum += row.correct + row.incorrectCount;
-    } else if (typeof row.correct === "number" && typeof row.total === "number" && row.total > 0) {
-      existing.qbankCorrectSum += row.correct;
-      existing.qbankIncorrectSum += Math.max(0, row.total - row.correct);
-      existing.qbankTotalSum += row.total;
-    } else if (typeof row.accuracy === "number") {
-      existing.qbankAccuracySum += clamp01(row.accuracy);
-      existing.qbankAccuracyCount += 1;
-    }
-
-    if (
-      process.env.NODE_ENV !== "production" &&
-      typeof row.usageUsed === "number" &&
-      typeof row.correct === "number" &&
-      typeof row.incorrectCount === "number"
-    ) {
-      const omitted = typeof row.omittedCount === "number" ? row.omittedCount : 0;
-      const expectedUsage = row.correct + row.incorrectCount + omitted;
-      if (row.usageUsed !== expectedUsage) {
-        const key = `${row.categoryType}::${row.name}`;
-        if (!warnedUsageMismatch.has(key)) {
-          warnedUsageMismatch.add(key);
-          console.warn(
-            `[avg-correct] usage mismatch for "${row.name}": usageUsed=${row.usageUsed}, correct+incorrect+omitted=${expectedUsage}`,
-          );
-        }
-      }
     }
   }
 
-  return Array.from(byKey.values()).map(finalizeAccumulator);
+  const accumulatorRows = Array.from(byKey.values());
+  const attemptedTotalsByCategory = new Map<CategoryType, number>();
+  for (const row of accumulatorRows) {
+    const attempted = row.qbankCorrectSum + row.qbankIncorrectSum;
+    if (attempted <= 0) {
+      continue;
+    }
+    attemptedTotalsByCategory.set(
+      row.categoryType,
+      (attemptedTotalsByCategory.get(row.categoryType) ?? 0) + attempted,
+    );
+  }
+
+  return accumulatorRows.map((row) => {
+    const attempted = row.qbankCorrectSum + row.qbankIncorrectSum;
+    const total = attemptedTotalsByCategory.get(row.categoryType) ?? 0;
+    const usageWeight = attempted > 0 && total > 0 ? attempted / total : null;
+    return finalizeAccumulator(row, usageWeight);
+  });
 }
 
 function getSectionRows(rows: DisplayRow[], categoryType: CategoryType) {
@@ -380,9 +544,13 @@ type RankContext = {
 
 function buildWhatToStudyBullets(row: DisplayRow, ranks: RankContext, hasScoreReport: boolean): string[] {
   const bullets: string[] = [];
-  bullets.push(`Makes up ${formatPercent(row.weight)} of the test.`);
+  bullets.push(
+    typeof row.blueprintWeight === "number"
+      ? `Makes up ${formatPercent(row.blueprintWeight)} of the test.`
+      : "Blueprint weight unavailable for this category.",
+  );
 
-  const hasQbank = row.hasRoi || typeof row.avgCorrect === "number";
+  const hasQbank = hasUsableQbankData(row);
   const hasScoreReportSignal = hasScoreReport && row.hasProi;
 
   if (!hasQbank && !hasScoreReportSignal) {
@@ -398,7 +566,7 @@ function buildWhatToStudyBullets(row: DisplayRow, ranks: RankContext, hasScoreRe
   const proiDriverScore = hasScoreReportSignal && typeof proiRank === "number" && proiRank > 0 ? 1 / proiRank : 0;
   const maxDriverScore = Math.max(roiDriverScore, avgDriverScore, proiDriverScore);
 
-  if (row.hasRoi) {
+  if (hasUsableQbankData(row)) {
     let roiMeaning = "improvements here should pay off quickly.";
     if (roiRank <= 3) {
       roiMeaning = "this is a highest-impact ROI signal and likely one of your fastest returns per study hour.";
@@ -407,17 +575,17 @@ function buildWhatToStudyBullets(row: DisplayRow, ranks: RankContext, hasScoreRe
     } else if (maxDriverScore === roiDriverScore) {
       roiMeaning = "ROI is the main driver here, so focused question reps should produce measurable gains.";
     }
-    bullets.push(`ROI rank #${roiRank} (value ${formatScore(row.roi)}): ${roiMeaning}`);
+    bullets.push(`ROI rank #${roiRank} (value ${formatScore(row.roi ?? 0)}): ${roiMeaning}`);
   }
 
-  if (typeof row.avgCorrect === "number" && typeof avgRank === "number") {
+  if (typeof row.avgPercentCorrect === "number" && typeof avgRank === "number") {
     let avgMeaning = "this is lower than most categories, so it's a likely point gain.";
     if (avgRank <= 5) {
       avgMeaning = "this is one of your lowest averages and needs urgent review.";
     } else if (maxDriverScore === avgDriverScore) {
       avgMeaning = "lowest average is the main reason this moved up your priority list.";
     }
-    bullets.push(`Avg % Correct rank #${avgRank} at ${formatPercent(row.avgCorrect)}: ${avgMeaning}`);
+    bullets.push(`Avg % Correct rank #${avgRank} at ${formatPercentFrom100(row.avgPercentCorrect)}: ${avgMeaning}`);
   }
 
   const shouldShowProi =
@@ -433,7 +601,7 @@ function buildWhatToStudyBullets(row: DisplayRow, ranks: RankContext, hasScoreRe
   }
 
   if (bullets.length === 1) {
-    if (row.weight >= 0.15) {
+    if ((row.blueprintWeight ?? 0) >= 0.15) {
       bullets.push("This is a large share of the test, so even modest gains can move your overall outcome.");
     }
   }
@@ -459,6 +627,7 @@ function RankTable({
           <thead>
             <tr className="border-b border-stone-200 text-left text-xs uppercase tracking-wide text-stone-600">
               <th className="px-3 py-2">Name</th>
+              <th className="px-3 py-2">Type</th>
               <th className="px-3 py-2">Weight</th>
               {mode === "roi" ? (
                 <>
@@ -474,10 +643,21 @@ function RankTable({
             {rows.map((row) => (
               <tr key={`${row.categoryType}-${row.name}`} className="border-b border-stone-100 last:border-0">
                 <td className="px-3 py-2 text-stone-900">{row.name}</td>
-                <td className="px-3 py-2 text-stone-700">{formatPercent(row.weight)}</td>
+                <td className="px-3 py-2 text-stone-500 text-xs">{CATEGORY_LABEL_BY_TYPE[row.categoryType]}</td>
+                <td className="px-3 py-2 text-stone-700">
+                  {typeof row.blueprintWeight === "number" ? formatPercent(row.blueprintWeight) : "—"}
+                </td>
                 {mode === "roi" ? (
                   <>
-                    <td className="px-3 py-2 text-stone-700">{row.hasRoi ? formatScore(row.roi) : "-"}</td>
+                    <td className="px-3 py-2 text-stone-700">
+                      {hasUsableQbankData(row) ? (
+                        formatScore(row.roi)
+                      ) : (
+                        <>
+                          <span>—</span> <span className="text-xs text-stone-500">(insufficient QBank data)</span>
+                        </>
+                      )}
+                    </td>
                     {showProiColumn ? (
                       <td className="px-3 py-2 text-stone-700">
                         {row.hasProi ? formatScore(row.proi) : PROI_PLACEHOLDER}
@@ -486,7 +666,13 @@ function RankTable({
                   </>
                 ) : (
                   <td className="px-3 py-2 text-stone-700">
-                    {typeof row.avgCorrect === "number" ? formatPercent(row.avgCorrect) : "— (QBank data required)"}
+                    {typeof row.avgPercentCorrect === "number" ? (
+                      formatPercentFrom100(row.avgPercentCorrect)
+                    ) : (
+                      <>
+                        <span>—</span> <span className="text-xs text-stone-500">(insufficient QBank data)</span>
+                      </>
+                    )}
                   </td>
                 )}
               </tr>
@@ -498,6 +684,155 @@ function RankTable({
   );
 }
 
+function DebugPanel({
+  enabled,
+  dataHealthDebug,
+  aggregationCoverageDebug,
+  step2MappingAudit,
+  medicineDebug,
+  aggregated,
+  rankingMode,
+  truthPanelRows,
+}: {
+  enabled: boolean;
+  dataHealthDebug: unknown;
+  aggregationCoverageDebug: unknown;
+  step2MappingAudit: unknown;
+  medicineDebug: { raw: unknown; derived: TruthPanelRow } | null;
+  aggregated: DisplayRow[];
+  rankingMode: RankingMode;
+  truthPanelRows: TruthPanelRow[];
+}) {
+  if (!enabled) {
+    return null;
+  }
+
+  return (
+    <>
+      <Card className="print-hide" title="Data Health">
+        <pre className="whitespace-pre-wrap break-words text-xs text-stone-700">
+          {JSON.stringify(dataHealthDebug, null, 2)}
+        </pre>
+      </Card>
+
+      <Card className="print-hide" title="Aggregation Coverage">
+        <pre className="whitespace-pre-wrap break-words text-xs text-stone-700">
+          {JSON.stringify(aggregationCoverageDebug, null, 2)}
+        </pre>
+      </Card>
+
+      {step2MappingAudit ? (
+        <Card className="print-hide" title="Step 2 Mapping Audit">
+          <pre className="whitespace-pre-wrap break-words text-xs text-stone-700">
+            {JSON.stringify(step2MappingAudit, null, 2)}
+          </pre>
+        </Card>
+      ) : null}
+
+      {medicineDebug ? (
+        <Card className="print-hide">
+          <p className="text-xs text-stone-600">
+            [debug] Medicine raw: correct={String((medicineDebug.raw as { correct?: number })?.correct ?? "null")},
+            incorrect={String((medicineDebug.raw as { incorrect?: number })?.incorrect ?? "null")},
+            omitted={String((medicineDebug.raw as { omitted?: number })?.omitted ?? "null")}, usageUsed=
+            {String((medicineDebug.raw as { usageUsed?: number })?.usageUsed ?? "null")}, usageTotal=
+            {String((medicineDebug.raw as { usageTotal?: number })?.usageTotal ?? "null")}
+            {" | "}derived: attempted={medicineDebug.derived.attempted}, accuracy=
+            {medicineDebug.derived.accuracyComputed == null ? "null" : medicineDebug.derived.accuracyComputed.toFixed(3)}
+            , avgPercent=
+            {medicineDebug.derived.avgPercentComputed == null ? "null" : medicineDebug.derived.avgPercentComputed.toFixed(1)}
+          </p>
+        </Card>
+      ) : null}
+
+      <Card className="print-hide">
+        <details>
+          <summary className="cursor-pointer text-sm font-semibold text-stone-800">Truth Panel</summary>
+          <div className="mt-3 overflow-x-auto">
+            <pre style={{ fontSize: 12, opacity: 0.8, margin: "8px 0" }}>
+              {JSON.stringify(
+                {
+                  NODE_ENV: process.env.NODE_ENV,
+                  rankingMode,
+                  aggregatedType: Array.isArray(aggregated) ? "array" : typeof aggregated,
+                  aggregatedLen: Array.isArray(aggregated) ? (aggregated?.length ?? null) : null,
+                  aggregatedFirst: aggregated?.[0]
+                    ? {
+                        categoryType: aggregated[0].categoryType,
+                        name: aggregated[0].name,
+                        blueprintWeight: aggregated[0].blueprintWeight,
+                        usageWeight: aggregated[0].usageWeight,
+                        roi: aggregated[0].roi,
+                        proi: aggregated[0].proi,
+                        attemptedCount: aggregated[0].attemptedCount,
+                      }
+                    : null,
+                  truthFirst: truthPanelRows?.[0]
+                    ? {
+                        displayName: truthPanelRows[0].displayName,
+                        sourceType: truthPanelRows[0].sourceType,
+                        blueprintWeightUsed: truthPanelRows[0].blueprintWeightUsed,
+                        usageWeightUsed: truthPanelRows[0].usageWeightUsed,
+                        attempted: truthPanelRows[0].attempted,
+                        avgPercentDisplayed: truthPanelRows[0].avgPercentDisplayed,
+                        drift: truthPanelRows[0].drift,
+                      }
+                    : null,
+                  displayRowsLen: sortDisplayRows(aggregated, rankingMode)?.length ?? null,
+                  truthLen: truthPanelRows?.length ?? null,
+                },
+                null,
+                2,
+              )}
+            </pre>
+            <table className="min-w-full border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-stone-200 text-left uppercase tracking-wide text-stone-600">
+                  <th className="px-2 py-1">displayName</th>
+                  <th className="px-2 py-1">sourceType</th>
+                  <th className="px-2 py-1">blueprintWeightUsed</th>
+                  <th className="px-2 py-1">usageWeightUsed</th>
+                  <th className="px-2 py-1">correctCount</th>
+                  <th className="px-2 py-1">incorrectCount</th>
+                  <th className="px-2 py-1">attempted</th>
+                  <th className="px-2 py-1">accuracyComputed</th>
+                  <th className="px-2 py-1">avgPercentDisplayed</th>
+                  <th className="px-2 py-1">avgPercentComputed</th>
+                  <th className="px-2 py-1">drift</th>
+                </tr>
+              </thead>
+              <tbody>
+                {truthPanelRows.map((row) => (
+                  <tr key={`${row.sourceType}-${row.displayName}`} className="border-b border-stone-100 last:border-0">
+                    <td className="px-2 py-1">{row.displayName}</td>
+                    <td className="px-2 py-1">{row.sourceType}</td>
+                    <td className="px-2 py-1">{row.blueprintWeightUsed == null ? "-" : formatPercent(row.blueprintWeightUsed)}</td>
+                    <td className="px-2 py-1">{row.usageWeightUsed == null ? "-" : formatPercent(row.usageWeightUsed)}</td>
+                    <td className="px-2 py-1">{row.correctCount}</td>
+                    <td className="px-2 py-1">{row.incorrectCount}</td>
+                    <td className="px-2 py-1">{row.attempted}</td>
+                    <td className="px-2 py-1">{row.accuracyComputed == null ? "-" : row.accuracyComputed.toFixed(4)}</td>
+                    <td className="px-2 py-1">{row.avgPercentDisplayed == null ? "-" : row.avgPercentDisplayed.toFixed(1)}</td>
+                    <td className="px-2 py-1">{row.avgPercentComputed == null ? "-" : row.avgPercentComputed.toFixed(1)}</td>
+                    <td className="px-2 py-1">{row.drift == null ? "-" : row.drift.toFixed(3)}</td>
+                  </tr>
+                ))}
+                {truthPanelRows.length === 0 ? (
+                  <tr className="border-b border-stone-100 last:border-0">
+                    <td className="px-2 py-2 text-stone-500" colSpan={11}>
+                      No truth rows available.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      </Card>
+    </>
+  );
+}
+
 export default function ResultsPage() {
   const router = useRouter();
   const [rankingMode, setRankingMode] = useState<RankingMode>("roi");
@@ -506,10 +841,10 @@ export default function ResultsPage() {
   const [chatInput, setChatInput] = useState("");
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [chatError, setChatError] = useState("");
+  const [debugEnabled, setDebugEnabled] = useState(false);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const parsedRows = useSyncExternalStore(subscribeUploadSession, getClientParsedRows, getServerParsedRows);
   const uploadSession = getUploadSession();
-  const rawAggregated = useMemo(() => aggregateRows(parsedRows), [parsedRows]);
   const selectedTest = useMemo<TestType>(() => {
     const fromSession = getUploadSession()?.selectedTest;
     if (fromSession) {
@@ -518,11 +853,14 @@ export default function ResultsPage() {
     const fromRows = parsedRows.find((row) => row.testType)?.testType;
     return fromRows ?? DEFAULT_TEST_TYPE;
   }, [parsedRows]);
+  const rawAggregated = useMemo(() => aggregateRows(parsedRows, selectedTest), [parsedRows, selectedTest]);
   const aggregated = useMemo(() => withUsmleCanonicalCoverage(rawAggregated, selectedTest), [rawAggregated, selectedTest]);
   const categoryOrder = useMemo(() => getCategoryOrderForTest(selectedTest), [selectedTest]);
 
   const sections = useMemo<TableSection[]>(() => {
-    const generalRows = sortDisplayRows(aggregated, rankingMode);
+    const reportRows =
+      selectedTest === "usmle_step2" ? aggregated.filter((row) => isUworldTaxonomyRow(row)) : aggregated;
+    const generalRows = sortDisplayRows(reportRows, rankingMode);
     const categorySections = categoryOrder
       .map((categoryType) => ({
         key: categoryType,
@@ -546,7 +884,10 @@ export default function ResultsPage() {
     ];
   }, [aggregated, categoryOrder, rankingMode, selectedTest]);
 
-  const topFive = useMemo(() => sortByFocusScore(aggregated).slice(0, 5), [aggregated]);
+  const topFive = useMemo(
+    () => sortByFocusScore(selectedTest === "usmle_step2" ? aggregated.filter((row) => isUworldTaxonomyRow(row)) : aggregated).slice(0, 5),
+    [aggregated, selectedTest],
+  );
   const big3Roi = useMemo(() => buildBig3Data(aggregated, "roi"), [aggregated]);
   const big3Proi = useMemo(() => buildBig3Data(aggregated, "proi"), [aggregated]);
   const hasUworldQbankRows = useMemo(
@@ -555,14 +896,222 @@ export default function ResultsPage() {
       parsedRows.some((row) => row.inputSource === "uworld_qbank" || isUworldTaxonomyRow(row)),
     [parsedRows, selectedTest],
   );
-  const hasScoreReport = useMemo(() => {
+  const hasScoreReportData = useMemo(() => {
     const sessionFlag = uploadSession?.scoreReportProvided;
     if (typeof sessionFlag === "boolean") {
-      return sessionFlag;
+      if (!sessionFlag) {
+        return false;
+      }
     }
-    return parsedRows.some((row) => typeof row.proxyWeakness === "number");
+    return aggregated.some((bucket) => Number.isFinite(bucket.proi) && bucket.proi > 0);
   }, [parsedRows, uploadSession]);
-  const showProiColumn = useMemo(() => hasScoreReport && aggregated.some((row) => row.hasProi), [aggregated, hasScoreReport]);
+  const showProiColumn = useMemo(
+    () => hasScoreReportData && aggregated.some((row) => row.hasProi),
+    [aggregated, hasScoreReportData],
+  );
+  const step2MappingAudit = useMemo(() => {
+    if (selectedTest !== "usmle_step2") {
+      return null;
+    }
+
+    const entries: Step2MappingAuditEntry[] = parsedRows
+      .filter((row) => row.inputSource === "uworld_qbank" || isUworldTaxonomyRow(row))
+      .map((row) => {
+        const rawLabel = row.originalName ?? row.name;
+        const systemResult = canonicalizeSystemLabel(rawLabel);
+        const subjectResult = canonicalizeSubjectLabel(rawLabel, { systemCanonical: systemResult.canonical });
+        const correct = typeof row.correct === "number" ? row.correct : null;
+        const incorrectCount = typeof row.incorrectCount === "number" ? row.incorrectCount : null;
+        const attempted = correct != null && incorrectCount != null ? correct + incorrectCount : 0;
+        return {
+          rawLabel,
+          parsedCategoryType: row.categoryType,
+          mappedSubject: subjectResult.canonical,
+          mappedSystem: systemResult.canonical,
+          subjectReason: subjectResult.reason,
+          systemReason: systemResult.reason,
+          subjectUnmapped: subjectResult.unmapped,
+          systemUnmapped: systemResult.unmapped,
+          attempted,
+          correct,
+          incorrectCount,
+        };
+      });
+
+    const uniqueLabels = Array.from(new Set(entries.map((entry) => entry.rawLabel)));
+    const weightCheck = assertStep2CanonicalWeights();
+    const outputSubjectRows = aggregated.filter((row) => row.categoryType === "uworld_subject").length;
+    const outputSystemRows = aggregated.filter((row) => row.categoryType === "uworld_system").length;
+
+    return {
+      totalRawCategoriesEncountered: uniqueLabels.length,
+      mappingTable: entries.map((entry) => ({
+        rawLabel: entry.rawLabel,
+        parsedCategoryType: entry.parsedCategoryType,
+        mappedSubject: entry.mappedSubject,
+        mappedSystem: entry.mappedSystem,
+        subjectReason: entry.subjectReason,
+        systemReason: entry.systemReason,
+      })),
+      unmappedItemsCount: entries.filter((entry) => entry.subjectUnmapped || entry.systemUnmapped).length,
+      asserts: {
+        subjectWeightsSumPct: weightCheck.subjectSum * 100,
+        systemWeightsSumPct: weightCheck.systemSum * 100,
+        subjectWeightsNotNormalized: weightCheck.subjectsNotNormalized,
+        medicineMidpointOk: weightCheck.medicineMidpointOk,
+        systemWeightsSumOk: weightCheck.systemsOk,
+        outputIncludesAllSubjects: outputSubjectRows >= STEP2_SUBJECT_CANONICAL.length,
+        outputIncludesAllSystems: outputSystemRows >= STEP2_SYSTEM_CANONICAL.length,
+      },
+    };
+  }, [aggregated, parsedRows, selectedTest]);
+  const dataHealthDebug = useMemo(() => {
+    const getCorrectCount = (row: ParsedRow): number | null => {
+      const withAlt = row as ParsedRow & { correctCount?: unknown };
+      if (typeof row.correct === "number") {
+        return row.correct;
+      }
+      if (typeof withAlt.correctCount === "number") {
+        return withAlt.correctCount;
+      }
+      return null;
+    };
+    const getIncorrectCount = (row: ParsedRow): number | null => {
+      const withAlt = row as ParsedRow & { incorrect?: unknown };
+      if (typeof row.incorrectCount === "number") {
+        return row.incorrectCount;
+      }
+      if (typeof withAlt.incorrect === "number") {
+        return withAlt.incorrect;
+      }
+      return null;
+    };
+    const getPercentCorrect = (row: ParsedRow): number | null => {
+      const withAlt = row as ParsedRow & { avgCorrect?: unknown };
+      if (typeof row.accuracy === "number") {
+        return row.accuracy;
+      }
+      if (typeof withAlt.avgCorrect === "number") {
+        return withAlt.avgCorrect;
+      }
+      return null;
+    };
+
+    const rowsWithCorrectCount = parsedRows.filter((row) => getCorrectCount(row) != null).length;
+    const rowsWithIncorrectCount = parsedRows.filter((row) => getIncorrectCount(row) != null).length;
+    const rowsWithBothCounts = parsedRows.filter(
+      (row) => getCorrectCount(row) != null && getIncorrectCount(row) != null,
+    ).length;
+    const rowsWithAttemptedGT0 = parsedRows.filter(
+      (row) => {
+        const correct = getCorrectCount(row);
+        const incorrect = getIncorrectCount(row);
+        return correct != null && incorrect != null && correct + incorrect > 0;
+      },
+    ).length;
+    const rowsWithPercentCorrect = parsedRows.filter((row) => getPercentCorrect(row) != null).length;
+    const parsedRowsSample = parsedRows.slice(0, 3).map((row) => ({
+      categoryType: row.categoryType,
+      name: row.name,
+      source: row.source ?? null,
+      correctCount: getCorrectCount(row),
+      incorrectCount: getIncorrectCount(row),
+      percentCorrect: getPercentCorrect(row),
+    }));
+
+    return {
+      parsedRowsTotal: parsedRows.length,
+      rowsWithCorrectCount,
+      rowsWithIncorrectCount,
+      rowsWithBothCounts,
+      rowsWithAttemptedGT0,
+      rowsWithPercentCorrect,
+      aggregatedCategoriesTotal: aggregated.length,
+      aggregatedWithAttemptedGT0: aggregated.filter((row) => row.attemptedCount > 0).length,
+      aggregatedWithAvgPercentNonNull: aggregated.filter((row) => typeof row.avgPercentCorrect === "number").length,
+      parsedRowsSample,
+    };
+  }, [aggregated, parsedRows]);
+  const aggregationCoverageDebug = useMemo(() => {
+    const getCorrectCount = (row: ParsedRow): number | null => {
+      const withAlt = row as ParsedRow & { correctCount?: unknown };
+      if (typeof row.correct === "number") {
+        return row.correct;
+      }
+      if (typeof withAlt.correctCount === "number") {
+        return withAlt.correctCount;
+      }
+      return null;
+    };
+    const getIncorrectCount = (row: ParsedRow): number | null => {
+      const withAlt = row as ParsedRow & { incorrect?: unknown };
+      if (typeof row.incorrectCount === "number") {
+        return row.incorrectCount;
+      }
+      if (typeof withAlt.incorrect === "number") {
+        return withAlt.incorrect;
+      }
+      return null;
+    };
+
+    const attemptedRows = parsedRows
+      .map((row) => {
+        const correct = getCorrectCount(row);
+        const incorrect = getIncorrectCount(row);
+        const attempted = correct != null && incorrect != null ? correct + incorrect : 0;
+        const hasAttempted = attempted > 0;
+        const hasCountAccuracy = typeof correct === "number" && typeof incorrect === "number" && incorrect >= 0;
+        const step2Buckets =
+          selectedTest === "usmle_step2" && (row.inputSource === "uworld_qbank" || isUworldTaxonomyRow(row))
+            ? getStep2BucketsForRow(row, hasCountAccuracy)
+            : [];
+        const bucketKeys =
+          hasAttempted && step2Buckets.length > 0
+            ? step2Buckets.map((bucket) => bucket.key)
+            : hasAttempted
+              ? [resolveAggregationBucket(row, hasCountAccuracy)?.key].filter((value): value is string => Boolean(value))
+              : [];
+        return { row, correct, incorrect, attempted, bucketKeys };
+      })
+      .filter((entry) => entry.attempted > 0);
+
+    const aggregatedAttemptedByKey = new Map<string, number>();
+    for (const row of aggregated) {
+      aggregatedAttemptedByKey.set(`${row.categoryType}::${row.name}`, row.attemptedCount);
+    }
+
+    const droppedRows = attemptedRows
+      .filter((entry) => {
+        if (entry.bucketKeys.length === 0) {
+          return true;
+        }
+        return entry.bucketKeys.every((key) => (aggregatedAttemptedByKey.get(key) ?? 0) <= 0);
+      })
+      .map((entry) => ({
+        categoryType: entry.row.categoryType,
+        name: entry.row.name,
+        correct: entry.correct,
+        incorrectCount: entry.incorrect,
+        attempted: entry.attempted,
+        mappingKey: entry.bucketKeys.length > 0 ? entry.bucketKeys.join(", ") : null,
+      }));
+
+    return {
+      attemptedParsedRowCount: attemptedRows.length,
+      attemptedAggregatedSum: aggregated.reduce((sum, row) => sum + row.attemptedCount, 0),
+      droppedRows,
+      attemptedAggregatedBuckets: aggregated
+        .filter((row) => row.attemptedCount > 0)
+        .map((row) => ({
+          categoryType: row.categoryType,
+          name: row.name,
+          attempted: row.attemptedCount,
+          blueprintWeight: row.blueprintWeight,
+          usageWeight: row.usageWeight,
+          roi: row.roi,
+        })),
+    };
+  }, [aggregated, parsedRows, selectedTest]);
   const unmappedGroups = useMemo<UnmappedRowGroup[]>(() => {
     const map = new Map<string, UnmappedRowGroup>();
     for (const row of parsedRows) {
@@ -611,8 +1160,8 @@ export default function ResultsPage() {
       aggregated.map((row) => ({
         name: row.name,
         categoryType: row.categoryType,
-        weight: row.weight,
-        roi: row.roi,
+        weight: row.blueprintWeight ?? 0,
+        roi: row.roi ?? 0,
         proi: row.hasProi ? row.proi : 0,
         avgCorrect: typeof row.avgCorrect === "number" ? row.avgCorrect : null,
       })),
@@ -653,7 +1202,9 @@ export default function ResultsPage() {
             ? typeof row.avgCorrect === "number"
               ? row.avgCorrect
               : Number.POSITIVE_INFINITY
-            : row[scoreKey],
+            : typeof row[scoreKey] === "number"
+              ? row[scoreKey]
+              : Number.NEGATIVE_INFINITY,
       }));
 
     const roiOrdered = sortDisplayRows([...aggregated], "roi");
@@ -667,8 +1218,8 @@ export default function ResultsPage() {
       topFive: topFive.map((row) => ({
         name: row.name,
         categoryType: row.categoryType,
-        weight: row.weight,
-        roi: row.roi,
+        weight: row.blueprintWeight ?? 0,
+        roi: row.roi ?? 0,
         proi: row.hasProi ? row.proi : 0,
         avgCorrect: typeof row.avgCorrect === "number" ? row.avgCorrect : null,
       })),
@@ -678,6 +1229,137 @@ export default function ResultsPage() {
       combinedRanking: toRanked(combinedOrdered, "focusScore"),
     };
   }, [aggregated, selectedTest, topFive, zeusRows]);
+  const truthPanelRows = useMemo<TruthPanelRow[]>(() => {
+    if (!debugEnabled) {
+      return [];
+    }
+    const generalRows = sortDisplayRows(aggregated, rankingMode);
+    const requiredNames = new Set(["Medicine", "Pediatrics", "Pregnancy/Childbirth & the Puerperium"]);
+    const candidates = [...generalRows.slice(0, 10)];
+    for (const name of requiredNames) {
+      const found = generalRows.find((row) => row.name === name);
+      if (found && !candidates.some((row) => row.categoryType === found.categoryType && row.name === found.name)) {
+        candidates.push(found);
+      }
+    }
+    return candidates.map((row) => {
+      const attempted = row.qbankCorrectSum + row.qbankIncorrectSum;
+      const accuracyComputed = computeAccuracy(row.qbankCorrectSum, row.qbankIncorrectSum);
+      const avgPercentComputed = computeAvgPercentCorrect(row.qbankCorrectSum, row.qbankIncorrectSum);
+      const avgPercentDisplayed =
+        typeof row.avgPercentCorrect === "number" ? row.avgPercentCorrect : null;
+      const drift =
+        avgPercentDisplayed != null && avgPercentComputed != null
+          ? avgPercentDisplayed - avgPercentComputed
+          : null;
+      return {
+        displayName: row.name,
+        sourceType: row.categoryType,
+        blueprintWeightUsed: row.blueprintWeight,
+        usageWeightUsed: row.usageWeight,
+        correctCount: row.qbankCorrectSum,
+        incorrectCount: row.qbankIncorrectSum,
+        attempted,
+        accuracyComputed,
+        avgPercentDisplayed,
+        avgPercentComputed,
+        drift,
+      };
+    });
+  }, [aggregated, debugEnabled, rankingMode]);
+
+  useEffect(() => {
+    if (!debugEnabled) {
+      return;
+    }
+    for (const row of truthPanelRows) {
+      if (row.attempted > 0 && row.drift != null && Math.abs(row.drift) > 0.5) {
+        console.warn("[truth-panel] avgPercent drift detected", row);
+      }
+      if (row.avgPercentDisplayed != null && (row.avgPercentDisplayed < 0 || row.avgPercentDisplayed > 100)) {
+        console.error("[truth-panel] avgPercent out of bounds", row);
+      }
+    }
+  }, [debugEnabled, truthPanelRows]);
+
+  const medicineDebug = useMemo(() => {
+    if (!debugEnabled) {
+      return null;
+    }
+    const row = truthPanelRows.find((entry) => entry.displayName === "Medicine");
+    if (!row) {
+      return null;
+    }
+    const medicineRows = parsedRows.filter(
+        (item) =>
+          item.categoryType === "uworld_subject" &&
+        (item.name === "Medicine" || item.originalName === "Medicine" || item.originalName === "Internal Medicine"),
+    );
+    const raw = medicineRows.reduce(
+      (acc, item) => ({
+        correct: acc.correct + (typeof item.correct === "number" ? item.correct : 0),
+        incorrect: acc.incorrect + (typeof item.incorrectCount === "number" ? item.incorrectCount : 0),
+        omitted: acc.omitted + (typeof item.omittedCount === "number" ? item.omittedCount : 0),
+        usageUsed: acc.usageUsed + (typeof item.usageUsed === "number" ? item.usageUsed : 0),
+        usageTotal: acc.usageTotal + (typeof item.usageTotal === "number" ? item.usageTotal : 0),
+      }),
+      { correct: 0, incorrect: 0, omitted: 0, usageUsed: 0, usageTotal: 0 },
+    );
+    return { raw, derived: row };
+  }, [debugEnabled, parsedRows, truthPanelRows]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || process.env.NODE_ENV === "production") {
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    const queryEnabled = params.get("debug") === "1";
+    const storedEnabled = window.localStorage.getItem("achilles_debug") === "1";
+    setDebugEnabled(queryEnabled || storedEnabled);
+  }, []);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production" || selectedTest !== "usmle_step2") {
+      return;
+    }
+
+    const expectedSubjectWeightsPct: Record<string, number> = {
+      Medicine: 60.0,
+      Surgery: 25.0,
+      Pediatrics: 22.0,
+      "Obstetrics & Gynecology": 15.0,
+      Psychiatry: 12.5,
+    };
+
+    for (const [name, expectedPct] of Object.entries(expectedSubjectWeightsPct)) {
+      const actual = STEP2_SUBJECT_WEIGHTS[name as keyof typeof STEP2_SUBJECT_WEIGHTS] ?? null;
+      if (actual == null || Math.abs(actual * 100 - expectedPct) > 1e-6) {
+        throw new Error(`[step2-assert] Subject weight mismatch for "${name}". Expected ${expectedPct}%, got ${actual == null ? "null" : (actual * 100).toFixed(3)}%.`);
+      }
+    }
+
+    const medicineRow = aggregated.find((row) => row.categoryType === "uworld_subject" && row.name === "Medicine");
+    if (
+      medicineRow &&
+      typeof medicineRow.avgPercentCorrect === "number" &&
+      typeof medicineRow.roi === "number" &&
+      medicineRow.attemptedCount > 0
+    ) {
+      const expectedRoi = (1 - medicineRow.avgPercentCorrect / 100) * 0.6;
+      if (Math.abs(medicineRow.roi - expectedRoi) > 1e-9) {
+        throw new Error(
+          `[step2-assert] Medicine ROI drift. expected=${expectedRoi.toFixed(6)} actual=${medicineRow.roi.toFixed(6)}`,
+        );
+      }
+    }
+
+    const systemRows = aggregated.filter((row) => row.categoryType === "uworld_system");
+    if (systemRows.length !== STEP2_SYSTEM_CANONICAL.length) {
+      throw new Error(
+        `[step2-assert] Systems row count mismatch. expected=${STEP2_SYSTEM_CANONICAL.length} actual=${systemRows.length}`,
+      );
+    }
+  }, [aggregated, selectedTest]);
 
   useEffect(() => {
     if (!chatScrollRef.current) {
@@ -734,8 +1416,9 @@ export default function ResultsPage() {
       window.print();
     }
   };
+  const isDevNoSession = process.env.NODE_ENV !== "production" && parsedRows.length === 0;
 
-  if (parsedRows.length === 0) {
+  if (process.env.NODE_ENV === "production" && parsedRows.length === 0) {
     return (
       <section className="space-y-8 pt-6 sm:pt-10">
         <BrandHeader subtitle="No results session found." />
@@ -757,6 +1440,11 @@ export default function ResultsPage() {
   return (
     <section className="space-y-6 pt-6 sm:pt-10">
       <BrandHeader />
+      {isDevNoSession ? (
+        <Alert variant="error">
+          DEV MODE: no results session found — showing empty debug view.
+        </Alert>
+      ) : null}
       <div id="results-print-root" className="space-y-6">
       <Card className="print-avoid-break">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -807,6 +1495,17 @@ export default function ResultsPage() {
         </div>
       </Card>
 
+      <DebugPanel
+        enabled={debugEnabled}
+        dataHealthDebug={dataHealthDebug}
+        aggregationCoverageDebug={aggregationCoverageDebug}
+        step2MappingAudit={step2MappingAudit}
+        medicineDebug={medicineDebug}
+        aggregated={aggregated}
+        rankingMode={rankingMode}
+        truthPanelRows={truthPanelRows}
+      />
+
       {mappingFailureRate > 0.05 ? (
         <Alert variant="error">
           {`Mapping failed — many categories could not be matched to the ${getTestLabel(selectedTest)} blueprint. This is a bug. Please re-upload or report.`}
@@ -821,9 +1520,13 @@ export default function ResultsPage() {
                 {row.name} ({CATEGORY_LABEL_BY_TYPE[row.categoryType]})
               </p>
               <p>
-                Weight: {formatPercent(row.weight)} | ROI: {row.hasRoi ? formatScore(row.roi) : "-"}
+                Weight: {row.blueprintWeight == null ? "—" : formatPercent(row.blueprintWeight)} | ROI:{" "}
+                {hasUsableQbankData(row) ? formatScore(row.roi) : "— (insufficient QBank data)"}
                 {showProiColumn ? ` | PROI: ${row.hasProi ? formatScore(row.proi) : PROI_PLACEHOLDER}` : ""}
-                {" | "}Avg % Correct: {typeof row.avgCorrect === "number" ? formatPercent(row.avgCorrect) : "Not available"}
+                {" | "}Avg % Correct:{" "}
+                {typeof row.avgPercentCorrect === "number"
+                  ? formatPercentFrom100(row.avgPercentCorrect)
+                  : "— (insufficient QBank data)"}
               </p>
             </li>
           ))}
@@ -842,7 +1545,7 @@ export default function ResultsPage() {
                   roiRank: roiRankMap.get(`${row.categoryType}::${row.name}`) ?? 0,
                   proiRank: proiRankMap.get(`${row.categoryType}::${row.name}`),
                   avgRank: avgRankMap.get(`${row.categoryType}::${row.name}`),
-                }, hasScoreReport).map((bullet) => (
+                }, hasScoreReportData).map((bullet) => (
                   <li key={`${row.name}-study-${bullet}`}>{bullet}</li>
                 ))}
               </ul>
@@ -854,17 +1557,19 @@ export default function ResultsPage() {
       {selectedTest === "usmle_step2" ? (
         <Card className="print-avoid-break">
           <div className="space-y-1 text-sm text-stone-700">
-            {hasUworldQbankRows ? <p>QBank ROI (UWorld Subjects/Systems)</p> : null}
-            {hasScoreReport ? <p>PROI (Score Report / NBME / Free120)</p> : null}
+            {hasUworldQbankRows ? <p>QBank ROI (Subjects/Systems)</p> : null}
+            {hasScoreReportData ? <p>PROI (Score Report / NBME / Free120)</p> : null}
           </div>
         </Card>
       ) : null}
 
-      {selectedTest === "usmle_step2" && (big3Roi.hasData || big3Proi.hasData) ? (
+      {selectedTest === "usmle_step2" && (big3Roi.hasData || (hasScoreReportData && big3Proi.hasData)) ? (
         <Card title="Big-3" className="print-avoid-break">
           <p className="text-sm text-stone-700">
-            Big-3 = your highest-impact study targets right now. ROI uses QBank performance; PROI uses score-report
-            weakness. Both already combine how weak you are and how heavily the exam weights that area.
+            Big-3 = your highest-impact study targets right now. ROI uses QBank performance
+            {hasScoreReportData
+              ? "; PROI uses score-report weakness. Both already combine how weak you are and how heavily the exam weights that area."
+              : "."}
           </p>
 
           {big3Roi.hasData ? (
@@ -872,14 +1577,21 @@ export default function ResultsPage() {
               <h3 className="text-sm font-semibold text-stone-900">Big-3 (QBank ROI)</h3>
               <div className="grid gap-3 md:grid-cols-3">
                 <div className="rounded-md border border-stone-200 bg-stone-50/40 p-3 text-sm text-stone-800">
-                  <p className="font-semibold text-stone-900">Medicine (IM)</p>
+                  <p className="font-semibold text-stone-900">Medicine</p>
                   {big3Roi.medicineRow ? (
                     <p>
-                      ROI: {formatScore(big3Roi.medicineRow.roi)} | Avg % Correct:{" "}
-                      {typeof big3Roi.medicineRow.avgCorrect === "number"
-                        ? formatPercent(big3Roi.medicineRow.avgCorrect)
-                        : "Not available"}{" "}
-                      | Weight: {formatPercent(big3Roi.medicineRow.weight)}
+                      ROI:{" "}
+                      {hasUsableQbankData(big3Roi.medicineRow)
+                        ? formatScore(big3Roi.medicineRow.roi)
+                        : "— (insufficient QBank data)"}{" "}
+                      | Avg % Correct:{" "}
+                      {typeof big3Roi.medicineRow.avgPercentCorrect === "number"
+                        ? formatPercentFrom100(big3Roi.medicineRow.avgPercentCorrect)
+                        : "— (insufficient QBank data)"}{" "}
+                      | Weight:{" "}
+                      {big3Roi.medicineRow.blueprintWeight == null
+                        ? "—"
+                        : formatPercent(big3Roi.medicineRow.blueprintWeight)}
                     </p>
                   ) : (
                     <p>Not available</p>
@@ -890,33 +1602,48 @@ export default function ResultsPage() {
                   <ul className="list-disc pl-5">
                     {big3Roi.topSystems.map((row) => (
                       <li key={`big3-roi-system-${row.name}`}>
-                        {row.name} (ROI): {formatScore(row.roi)}
+                        {row.name} (ROI): {hasUsableQbankData(row) ? formatScore(row.roi) : "— (insufficient QBank data)"}
                       </li>
                     ))}
                   </ul>
                 </div>
                 <div className="rounded-md border border-stone-200 bg-stone-50/40 p-3 text-sm text-stone-800">
                   <p className="font-semibold text-stone-900">Biostats + Social</p>
-                  <p>Biostats ROI: {formatScore(big3Roi.biostatsRow?.roi ?? 0)}</p>
-                  <p>Social Sciences ROI: {formatScore(big3Roi.socialRow?.roi ?? 0)}</p>
+                  <p>
+                    Biostats ROI:{" "}
+                    {big3Roi.biostatsRow && hasUsableQbankData(big3Roi.biostatsRow)
+                      ? formatScore(big3Roi.biostatsRow.roi)
+                      : "— (insufficient QBank data)"}
+                  </p>
+                  <p>
+                    Social Sciences ROI:{" "}
+                    {big3Roi.socialRow && hasUsableQbankData(big3Roi.socialRow)
+                      ? formatScore(big3Roi.socialRow.roi)
+                      : "— (insufficient QBank data)"}
+                  </p>
                 </div>
               </div>
             </div>
           ) : null}
 
-          {big3Proi.hasData ? (
+          {hasScoreReportData && big3Proi.hasData ? (
             <div className="space-y-3">
               <h3 className="text-sm font-semibold text-stone-900">Big-3 (Score Report PROI)</h3>
               <div className="grid gap-3 md:grid-cols-3">
                 <div className="rounded-md border border-stone-200 bg-stone-50/40 p-3 text-sm text-stone-800">
-                  <p className="font-semibold text-stone-900">Medicine (IM)</p>
+                  <p className="font-semibold text-stone-900">Medicine</p>
                   {big3Proi.medicineRow ? (
                     <p>
                       PROI: {formatScore(big3Proi.medicineRow.proi)} | Proxy Weakness:{" "}
-                      {typeof big3Proi.medicineRow.proi === "number" && big3Proi.medicineRow.weight > 0
-                        ? formatPercent(big3Proi.medicineRow.proi / big3Proi.medicineRow.weight)
+                      {typeof big3Proi.medicineRow.proi === "number" &&
+                      typeof big3Proi.medicineRow.blueprintWeight === "number" &&
+                      big3Proi.medicineRow.blueprintWeight > 0
+                        ? formatPercent(big3Proi.medicineRow.proi / big3Proi.medicineRow.blueprintWeight)
                         : "Not available"}{" "}
-                      | Weight: {formatPercent(big3Proi.medicineRow.weight)}
+                      | Weight:{" "}
+                      {big3Proi.medicineRow.blueprintWeight == null
+                        ? "—"
+                        : formatPercent(big3Proi.medicineRow.blueprintWeight)}
                     </p>
                   ) : (
                     <p>Not available</p>
@@ -1070,4 +1797,5 @@ export default function ResultsPage() {
     </section>
   );
 }
+
 
