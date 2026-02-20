@@ -112,6 +112,7 @@ type Step2MappingAuditEntry = {
 type Big3Metric = "roi" | "proi";
 const WHAT_TO_STUDY_K = 7;
 const WHAT_TO_STUDY_SYSTEMS_N = 10;
+const COMLEX_TOP_N = 5;
 
 const modeLabels: Record<RankingMode, string> = {
   roi: "Rank by ROI",
@@ -143,6 +144,10 @@ function formatPercentFrom100(value: number) {
 
 function formatScore(value: number) {
   return value.toFixed(3);
+}
+
+function formatMissingMetric(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value) ? formatScore(value) : "-";
 }
 
 function hasUsableQbankData(row: DisplayRow): row is DisplayRow & { roi: number; avgPercentCorrect: number } {
@@ -556,7 +561,7 @@ function buildWhatToStudyBullets(row: DisplayRow, ranks: RankContext, hasScoreRe
   const hasScoreReportSignal = hasScoreReport && row.hasProi;
 
   if (!hasQbank && !hasScoreReportSignal) {
-    bullets.push("Not enough data yetâ€”add QBank or a score report to prioritize this accurately.");
+    bullets.push("Not enough data yet - add QBank or a score report to prioritize this accurately.");
     return bullets;
   }
 
@@ -647,18 +652,12 @@ function RankTable({
                 <td className="px-3 py-2 text-stone-900">{row.name}</td>
                 <td className="px-3 py-2 text-stone-500 text-xs">{CATEGORY_LABEL_BY_TYPE[row.categoryType]}</td>
                 <td className="px-3 py-2 text-stone-700">
-                  {typeof row.blueprintWeight === "number" ? formatPercent(row.blueprintWeight) : "â€”"}
+                  {typeof row.blueprintWeight === "number" ? formatPercent(row.blueprintWeight) : "-"}
                 </td>
                 {mode === "roi" ? (
                   <>
                     <td className="px-3 py-2 text-stone-700">
-                      {hasUsableQbankData(row) ? (
-                        formatScore(row.roi)
-                      ) : (
-                        <>
-                          <span>â€”</span> <span className="text-xs text-stone-500">(insufficient QBank data)</span>
-                        </>
-                      )}
+                      {hasUsableQbankData(row) ? formatScore(row.roi) : "-"}
                     </td>
                     {showProiColumn ? (
                       <td className="px-3 py-2 text-stone-700">
@@ -671,9 +670,7 @@ function RankTable({
                     {typeof row.avgPercentCorrect === "number" ? (
                       formatPercentFrom100(row.avgPercentCorrect)
                     ) : (
-                      <>
-                        <span>â€”</span> <span className="text-xs text-stone-500">(insufficient QBank data)</span>
-                      </>
+                      "-"
                     )}
                   </td>
                 )}
@@ -922,6 +919,16 @@ export default function ResultsPage() {
       return a.name.localeCompare(b.name);
     });
   }, [roiRankedValidRows, whatToStudySystems]);
+  const comlexDisplayItems = useMemo(
+    () => (selectedTest === "comlex2" ? whatToStudyItems.slice(0, COMLEX_TOP_N) : whatToStudyItems),
+    [selectedTest, whatToStudyItems],
+  );
+  const hasComlexQbankRoiRows = useMemo(
+    () =>
+      selectedTest === "comlex2" &&
+      aggregated.some((row) => row.attemptedCount > 0 && typeof row.roi === "number"),
+    [aggregated, selectedTest],
+  );
   const big3Roi = useMemo(() => buildBig3Data(aggregated, "roi"), [aggregated]);
   const hasScoreReportData = useMemo(() => {
     const sessionFlag = uploadSession?.scoreReportProvided;
@@ -935,6 +942,15 @@ export default function ResultsPage() {
   const showProiColumn = useMemo(
     () => hasScoreReportData && aggregated.some((row) => row.hasProi),
     [aggregated, hasScoreReportData],
+  );
+  const isComlexScoreReportOnly = selectedTest === "comlex2" && hasScoreReportData && !hasComlexQbankRoiRows;
+  const comlexProiItems = useMemo(
+    () =>
+      aggregated
+        .filter((row) => Number.isFinite(row.proi) && row.proi > 0)
+        .sort((a, b) => b.proi - a.proi)
+        .slice(0, COMLEX_TOP_N),
+    [aggregated],
   );
   const isProiMode = (rankingMode as string) === "proi";
   const activePriorityMetric: "roi" | "proi" = isProiMode && hasScoreReportData ? "proi" : "roi";
@@ -1756,49 +1772,88 @@ export default function ResultsPage() {
       ) : (
         <>
           <Card title="Achilles Insight" className="print-avoid-break">
+            {isComlexScoreReportOnly ? (
+              <p className="mb-3 text-sm text-stone-600">
+                ROI not available (no QBank data submitted). Showing PROI (score-report proxy) instead.
+              </p>
+            ) : null}
             <ul className="space-y-4 text-sm text-stone-800">
-              {whatToStudyItems.map((row) => (
+              {(isComlexScoreReportOnly ? comlexProiItems : comlexDisplayItems).map((row) => (
                 <li key={`insight-${row.categoryType}-${row.name}`} className="rounded-md border border-stone-200 bg-stone-50/40 p-3">
                   <p className="font-semibold text-stone-900">
                     {row.name} ({CATEGORY_LABEL_BY_TYPE[row.categoryType]})
                   </p>
-                  <p>
-                    Weight: {row.blueprintWeight == null ? "—" : formatPercent(row.blueprintWeight)} | ROI:{" "}
-                    {hasUsableQbankData(row) ? formatScore(row.roi) : "— (insufficient QBank data)"}
-                    {showProiColumn ? ` | PROI: ${row.hasProi ? formatScore(row.proi) : PROI_PLACEHOLDER}` : ""}
-                    {" | "}Avg % Correct:{" "}
-                    {typeof row.avgPercentCorrect === "number"
-                      ? formatPercentFrom100(row.avgPercentCorrect)
-                      : "— (insufficient QBank data)"}
-                  </p>
+                  {(() => {
+                    const showROI =
+                      hasComlexQbankRoiRows &&
+                      typeof row.roi === "number" &&
+                      Number.isFinite(row.roi);
+                    const showPROI =
+                      hasScoreReportData &&
+                      typeof row.proi === "number" &&
+                      Number.isFinite(row.proi);
+                    return (
+                      <p>
+                        Weight: {row.blueprintWeight == null ? "-" : formatPercent(row.blueprintWeight)}
+                        {showROI ? ` | ROI: ${formatScore(row.roi as number)}` : ""}
+                        {showPROI ? ` | PROI: ${formatScore(row.proi)}` : ""}
+                        {" | "}Avg % Correct:{" "}
+                        {typeof row.avgPercentCorrect === "number" && Number.isFinite(row.avgPercentCorrect)
+                          ? formatPercentFrom100(row.avgPercentCorrect)
+                          : "-"}
+                      </p>
+                    );
+                  })()}
                 </li>
               ))}
+              {(isComlexScoreReportOnly ? comlexProiItems : comlexDisplayItems).length === 0 ? (
+                <li className="rounded-md border border-stone-200 bg-stone-50/40 p-3 text-stone-600">-</li>
+              ) : null}
             </ul>
           </Card>
 
-          <Card title="What to study?" className="print-avoid-break">
+          <Card title="WHAT TO STUDY?" className="print-avoid-break">
+            {isComlexScoreReportOnly ? (
+              <p className="mb-3 text-sm text-stone-600">
+                Upload QBank data to enable ROI (accuracy-based) rankings.
+              </p>
+            ) : null}
             <ul className="space-y-4 text-sm text-stone-800">
-              {whatToStudyItems.map((row) => (
+              {(isComlexScoreReportOnly ? comlexProiItems : comlexDisplayItems).map((row) => (
                 <li key={`study-${row.categoryType}-${row.name}`} className="rounded-md border border-stone-200 bg-stone-50/40 p-3">
                   <p className="font-semibold text-stone-900">
                     {row.name} ({CATEGORY_LABEL_BY_TYPE[row.categoryType]})
-                    {big3RoiKeySet.has(`${row.categoryType}::${row.name}`) ? (
+                    {!isComlexScoreReportOnly && big3RoiKeySet.has(`${row.categoryType}::${row.name}`) ? (
                       <span className="ml-2 inline-flex items-center rounded border border-stone-300 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-stone-600">
                         In Big-3
                       </span>
                     ) : null}
                   </p>
-                  <ul className="list-disc pl-5">
-                    {buildWhatToStudyBullets(row, {
-                      roiRank: roiRankMap.get(`${row.categoryType}::${row.name}`) ?? 0,
-                      proiRank: proiRankMap.get(`${row.categoryType}::${row.name}`),
-                      avgRank: avgRankMap.get(`${row.categoryType}::${row.name}`),
-                    }, hasScoreReportData).map((bullet) => (
-                      <li key={`${row.name}-study-${bullet}`}>{bullet}</li>
-                    ))}
-                  </ul>
+                  {(() => {
+                    const qbankPresent = hasComlexQbankRoiRows;
+                    const hasRoi = qbankPresent && typeof row.roi === "number" && Number.isFinite(row.roi);
+                    const hasProi = typeof row.proi === "number" && Number.isFinite(row.proi);
+                    const hasAvg = typeof row.avgPercentCorrect === "number" && Number.isFinite(row.avgPercentCorrect);
+                    const roiFmt = hasRoi ? formatScore(row.roi as number) : "-";
+                    const proiFmt = hasProi ? formatScore(row.proi) : "-";
+                    const weightPct = typeof row.blueprintWeight === "number" ? formatPercent(row.blueprintWeight) : "-";
+                    const avgPct = hasAvg ? formatPercentFrom100(row.avgPercentCorrect as number) : "-";
+                    return (
+                      <ul className="list-disc pl-5">
+                        {hasRoi ? (
+                          <li>Your QBank results show this area can return value quickly (ROI {roiFmt}).</li>
+                        ) : null}
+                        <li>This category carries {weightPct} of blueprint weight, so progress here matters.</li>
+                        {hasAvg ? <li>Avg % Correct is {avgPct}, which helps set urgency.</li> : null}
+                        {hasProi ? <li>Score report graph bars also flag this area (PROI {proiFmt}).</li> : null}
+                      </ul>
+                    );
+                  })()}
                 </li>
               ))}
+              {(isComlexScoreReportOnly ? comlexProiItems : comlexDisplayItems).length === 0 ? (
+                <li className="rounded-md border border-stone-200 bg-stone-50/40 p-3 text-stone-600">-</li>
+              ) : null}
             </ul>
           </Card>
         </>
