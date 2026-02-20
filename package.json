@@ -14,11 +14,14 @@
     "test:unit": "tsx app/lib/__tests__/avgCorrect.test.ts"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.5.2",
+    "@supabase/supabase-js": "^2.57.4",
     "next": "16.1.6",
     "p-limit": "^6.2.0",
     "pdf-parse": "^1.1.1",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "stripe": "^18.2.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
