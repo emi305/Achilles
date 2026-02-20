@@ -21,13 +21,13 @@ function toIsoIfUnix(timestamp: number | null): string | null {
 }
 
 async function handleSubscriptionUpsert(subscription: Stripe.Subscription) {
-  const { monthly, annual } = getStripePriceIds();
+  const { monthly, threeMonth, annual } = getStripePriceIds();
   const priceId = subscription.items.data[0]?.price?.id;
   if (!priceId) {
     return;
   }
 
-  const plan = planFromPriceId(priceId, monthly, annual);
+  const plan = planFromPriceId(priceId, monthly, threeMonth, annual);
   if (!plan) {
     return;
   }

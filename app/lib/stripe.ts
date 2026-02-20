@@ -15,6 +15,7 @@ export function getStripeClient() {
 export function getStripePriceIds() {
   return {
     monthly: requireServerEnv("STRIPE_PRICE_MONTHLY"),
+    threeMonth: requireServerEnv("STRIPE_PRICE_3MONTH_PRICE_ID"),
     annual: requireServerEnv("STRIPE_PRICE_ANNUAL"),
   };
 }

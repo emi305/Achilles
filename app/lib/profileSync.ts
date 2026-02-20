@@ -2,16 +2,23 @@ import type { User } from "@supabase/supabase-js";
 import { FALLBACK_ALLOWED_DOMAINS } from "./billing/constants";
 import { upsertEntitlement } from "./entitlements";
 import { getSupabaseAdminClient } from "./supabase/admin";
+import { isNoRowSupabaseError, logServerError } from "./supabase/errors";
+import { getDomainFromEmailOrDomain, isVcomEligibleEmailOrDomain } from "./vcom";
+
+function normalizeValue(value: string | null | undefined): string {
+  return (value ?? "").trim().toLowerCase();
+}
 
 function extractDomain(email: string | null | undefined): string | null {
-  if (!email) {
-    return null;
+  return getDomainFromEmailOrDomain(email);
+}
+
+function isDomainAllowedByEntry(domain: string, allowedDomain: string): boolean {
+  const normalizedAllowed = normalizeValue(allowedDomain);
+  if (!normalizedAllowed) {
+    return false;
   }
-  const atIndex = email.lastIndexOf("@");
-  if (atIndex <= -1 || atIndex === email.length - 1) {
-    return null;
-  }
-  return email.slice(atIndex + 1).toLowerCase();
+  return domain === normalizedAllowed || domain.endsWith(`.${normalizedAllowed}`);
 }
 
 async function isAllowedDomain(domain: string | null): Promise<boolean> {
@@ -19,27 +26,30 @@ async function isAllowedDomain(domain: string | null): Promise<boolean> {
     return false;
   }
 
-  const supabase = getSupabaseAdminClient();
-  const { data, error } = await supabase
-    .from("allowed_domains")
-    .select("domain, active")
-    .eq("domain", domain)
-    .eq("active", true)
-    .maybeSingle();
-
-  if (error) {
-    throw error;
-  }
-
-  if (data) {
+  // Always allow vcom.edu and any subdomain, even if allowed_domains is missing/incomplete.
+  if (isVcomEligibleEmailOrDomain(domain)) {
     return true;
   }
 
-  return FALLBACK_ALLOWED_DOMAINS.includes(domain);
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase.from("allowed_domains").select("domain").eq("active", true);
+
+  if (error) {
+    // allowed_domains is optional; fall back to static allowlist if this query fails.
+    logServerError("allowed_domains lookup failed", error);
+    return FALLBACK_ALLOWED_DOMAINS.some((allowed) => isDomainAllowedByEntry(domain, allowed));
+  }
+
+  const matchesAllowedDomain = (data ?? []).some((row) => isDomainAllowedByEntry(domain, row.domain));
+  if (matchesAllowedDomain) {
+    return true;
+  }
+
+  return FALLBACK_ALLOWED_DOMAINS.some((allowed) => isDomainAllowedByEntry(domain, allowed));
 }
 
 export async function syncProfileAndEntitlementForUser(user: User) {
-  const email = user.email ?? "";
+  const email = normalizeValue(user.email ?? "");
   const domain = extractDomain(email);
   const emailVerified = Boolean(user.email_confirmed_at);
   const fullName =
@@ -49,7 +59,16 @@ export async function syncProfileAndEntitlementForUser(user: User) {
 
   const supabase = getSupabaseAdminClient();
 
-  const isVcomEligible = emailVerified && (await isAllowedDomain(domain));
+  const isVcomEligible = await isAllowedDomain(domain);
+  if (process.env.NODE_ENV !== "production") {
+    console.log("[entitlement-sync] domain-check", {
+      email,
+      domain,
+      vcomEligible: isVcomEligible,
+      emailVerified,
+    });
+  }
+
   const profilePayload = {
     id: user.id,
     full_name: fullName,
@@ -65,7 +84,7 @@ export async function syncProfileAndEntitlementForUser(user: User) {
   }
 
   if (isVcomEligible) {
-    await upsertEntitlement({
+    const entitlement = await upsertEntitlement({
       user_id: user.id,
       plan_type: "vcom_free",
       status: "active",
@@ -75,6 +94,14 @@ export async function syncProfileAndEntitlementForUser(user: User) {
       stripe_subscription_id: null,
       current_period_end: null,
     });
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[entitlement-sync] grant", {
+        email,
+        domain,
+        planType: entitlement.plan_type,
+        status: entitlement.status,
+      });
+    }
     return;
   }
 
@@ -85,11 +112,13 @@ export async function syncProfileAndEntitlementForUser(user: User) {
     .maybeSingle();
 
   if (entitlementError) {
-    throw entitlementError;
+    if (!isNoRowSupabaseError(entitlementError)) {
+      throw entitlementError;
+    }
   }
 
-  if (!existingEntitlement) {
-    await upsertEntitlement({
+  if (!existingEntitlement || isNoRowSupabaseError(entitlementError)) {
+    const entitlement = await upsertEntitlement({
       user_id: user.id,
       plan_type: "trial",
       status: "inactive",
@@ -99,5 +128,13 @@ export async function syncProfileAndEntitlementForUser(user: User) {
       stripe_subscription_id: null,
       current_period_end: null,
     });
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[entitlement-sync] grant", {
+        email,
+        domain,
+        planType: entitlement.plan_type,
+        status: entitlement.status,
+      });
+    }
   }
 }

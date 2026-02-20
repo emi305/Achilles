@@ -5,7 +5,7 @@ import { createSupabaseServerClient } from "../../../lib/supabase/server";
 import { getStripeClient, getStripePriceIds } from "../../../lib/stripe";
 
 type CheckoutBody = {
-  plan?: "pro_monthly" | "pro_annual";
+  plan?: "pro_monthly" | "pro_3month" | "pro_annual";
 };
 
 function getSiteUrl(request: Request) {
@@ -36,18 +36,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Email verification required" }, { status: 400 });
   }
   if (profile.is_vcom_eligible) {
-    return NextResponse.json({ error: "VCOM users are already covered" }, { status: 400 });
+    return NextResponse.json({ error: "Access is already active for this account" }, { status: 400 });
   }
 
   const body = (await request.json().catch(() => ({}))) as CheckoutBody;
   const selectedPlan = body.plan;
-  if (selectedPlan !== "pro_monthly" && selectedPlan !== "pro_annual") {
+  if (selectedPlan !== "pro_monthly" && selectedPlan !== "pro_3month" && selectedPlan !== "pro_annual") {
     return NextResponse.json({ error: "Invalid plan selection" }, { status: 400 });
   }
 
   const stripe = getStripeClient();
-  const { monthly, annual } = getStripePriceIds();
-  const priceId = selectedPlan === "pro_monthly" ? monthly : annual;
+  const { monthly, threeMonth, annual } = getStripePriceIds();
+  const priceId = selectedPlan === "pro_monthly" ? monthly : selectedPlan === "pro_3month" ? threeMonth : annual;
 
   const entitlement = await getUserEntitlement(user.id);
   let customerId = entitlement?.stripe_customer_id ?? null;

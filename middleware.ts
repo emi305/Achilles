@@ -2,7 +2,9 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { hasActiveAccess } from "./app/lib/entitlements";
 import { syncProfileAndEntitlementForUser } from "./app/lib/profileSync";
+import { logServerError } from "./app/lib/supabase/errors";
 import { getPublicSupabaseEnv } from "./app/lib/supabase/env";
+import { getDomainFromEmailOrDomain, isVcomEligibleEmailOrDomain } from "./app/lib/vcom";
 
 export async function middleware(request: NextRequest) {
   const response = NextResponse.next({ request });
@@ -31,10 +33,31 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  await syncProfileAndEntitlementForUser(user);
-  const active = await hasActiveAccess(user.id);
+  const email = user.email ?? null;
+  const domain = getDomainFromEmailOrDomain(email);
+  const vcomEligible = isVcomEligibleEmailOrDomain(email);
+
+  let entitlementActive = false;
+  try {
+    await syncProfileAndEntitlementForUser(user);
+    entitlementActive = await hasActiveAccess(user.id);
+  } catch (error) {
+    logServerError("middleware sync failure", error);
+    entitlementActive = false;
+  }
+
+  const active = vcomEligible || entitlementActive;
+  if (process.env.NODE_ENV !== "production") {
+    console.log("[middleware] gating", {
+      email,
+      domain,
+      vcomEligible,
+      destination: active ? request.nextUrl.pathname : "/pricing",
+    });
+  }
+
   if (!active) {
-    const redirectUrl = new URL("/", request.url);
+    const redirectUrl = new URL("/pricing", request.url);
     redirectUrl.searchParams.set("access", "required");
     return NextResponse.redirect(redirectUrl);
   }

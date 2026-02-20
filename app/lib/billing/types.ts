@@ -1,4 +1,4 @@
-export type PlanType = "vcom_free" | "trial" | "pro_monthly" | "pro_annual";
+export type PlanType = "vcom_free" | "trial" | "pro_monthly" | "pro_3month" | "pro_annual";
 
 export type EntitlementStatus = "active" | "inactive" | "past_due" | "canceled" | "expired";
 

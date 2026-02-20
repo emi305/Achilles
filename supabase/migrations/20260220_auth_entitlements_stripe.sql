@@ -13,7 +13,7 @@ create table if not exists public.profiles (
 
 create table if not exists public.entitlements (
   user_id uuid primary key references auth.users(id) on delete cascade,
-  plan_type text not null check (plan_type in ('vcom_free', 'trial', 'pro_monthly', 'pro_annual')),
+  plan_type text not null check (plan_type in ('vcom_free', 'trial', 'pro_monthly', 'pro_3month', 'pro_annual')),
   status text not null check (status in ('active', 'inactive', 'past_due', 'canceled', 'expired')),
   trial_starts_at timestamptz null,
   trial_ends_at timestamptz null,

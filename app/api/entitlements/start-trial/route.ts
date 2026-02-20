@@ -28,7 +28,7 @@ export async function POST() {
   }
 
   if (profile.is_vcom_eligible) {
-    return NextResponse.json({ error: "VCOM users already receive free access" }, { status: 400 });
+    return NextResponse.json({ error: "Access is already active for this account" }, { status: 400 });
   }
 
   const existing = await getUserEntitlement(user.id);
