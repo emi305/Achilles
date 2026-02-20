@@ -2,11 +2,11 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { hasActiveAccess } from "./app/lib/entitlements";
 import { syncProfileAndEntitlementForUser } from "./app/lib/profileSync";
-import { getBaseSupabaseEnv } from "./app/lib/supabase/env";
+import { getPublicSupabaseEnv } from "./app/lib/supabase/env";
 
 export async function middleware(request: NextRequest) {
   const response = NextResponse.next({ request });
-  const { url, anonKey } = getBaseSupabaseEnv();
+  const { url, anonKey } = getPublicSupabaseEnv();
 
   const supabase = createServerClient(url, anonKey, {
     cookies: {

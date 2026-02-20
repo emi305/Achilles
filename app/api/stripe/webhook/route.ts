@@ -3,7 +3,7 @@ import Stripe from "stripe";
 import { mapStripeStatusToEntitlement, planFromPriceId, upsertEntitlement } from "../../../lib/entitlements";
 import { getSupabaseAdminClient } from "../../../lib/supabase/admin";
 import { getStripeClient, getStripePriceIds } from "../../../lib/stripe";
-import { requireEnv } from "../../../lib/supabase/env";
+import { requireServerEnv } from "../../../lib/supabase/env";
 
 export const runtime = "nodejs";
 
@@ -143,7 +143,7 @@ export async function POST(request: Request) {
 
   let event: Stripe.Event;
   try {
-    event = stripe.webhooks.constructEvent(payload, signature, requireEnv("STRIPE_WEBHOOK_SECRET"));
+    event = stripe.webhooks.constructEvent(payload, signature, requireServerEnv("STRIPE_WEBHOOK_SECRET"));
   } catch (error) {
     return NextResponse.json({ error: "Invalid webhook signature", detail: String(error) }, { status: 400 });
   }
