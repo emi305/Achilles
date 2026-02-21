@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Alert } from "../components/Alert";
 import { BrandHeader } from "../components/BrandHeader";
 import { Card } from "../components/Card";
+import { LogoutButton } from "../components/LogoutButton";
 import { TEMPLATE_OPTIONS, type TemplateChoice } from "../lib/templates";
 import type { CategoryType } from "../lib/types";
+import { createSupabaseBrowserClient } from "../lib/supabase/client";
 import {
   DEFAULT_PROFILE_NAME,
   DEFAULT_SETTINGS,
@@ -19,17 +20,42 @@ import {
   type ProfilesMap,
 } from "../lib/uploadSettings";
 
+type AccountInfo = {
+  displayName: string;
+  email: string;
+};
+
 function getInitialSettings() {
   const profiles = loadProfilesFromLocalStorage();
   const activeProfile = loadActiveProfileFromLocalStorage(profiles);
   return { profiles, activeProfile };
 }
 
+function deriveDisplayName(email: string | null, metadata: Record<string, unknown> | null | undefined): string {
+  const fullName = typeof metadata?.full_name === "string" ? metadata.full_name.trim() : "";
+  if (fullName) {
+    return fullName;
+  }
+
+  const name = typeof metadata?.name === "string" ? metadata.name.trim() : "";
+  if (name) {
+    return name;
+  }
+
+  if (email && email.includes("@")) {
+    const localPart = email.split("@")[0]?.trim();
+    if (localPart) {
+      return localPart;
+    }
+  }
+
+  return "User";
+}
+
 export default function SettingsPage() {
   const [profiles, setProfiles] = useState<ProfilesMap>(() => getInitialSettings().profiles);
-  const [activeProfile, setActiveProfile] = useState(() => getInitialSettings().activeProfile);
-  const [newProfileName, setNewProfileName] = useState("");
-  const [errorMessage, setErrorMessage] = useState("");
+  const [activeProfile] = useState(() => getInitialSettings().activeProfile);
+  const [account, setAccount] = useState<AccountInfo>({ displayName: "User", email: "Not available" });
 
   const currentSettings = profiles[activeProfile] ?? DEFAULT_SETTINGS;
   const templateChoice = currentSettings.templateChoice;
@@ -43,6 +69,30 @@ export default function SettingsPage() {
   useEffect(() => {
     saveActiveProfileToLocalStorage(activeProfile);
   }, [activeProfile]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadAccount = async () => {
+      const supabase = createSupabaseBrowserClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (cancelled) {
+        return;
+      }
+
+      const email = user?.email ?? "Not available";
+      const displayName = deriveDisplayName(user?.email ?? null, (user?.user_metadata as Record<string, unknown> | null) ?? null);
+      setAccount({ displayName, email });
+    };
+
+    void loadAccount();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const isDefaultCategoryVisible = useMemo(
     () => templateChoice === "category_performance" || templateChoice === "percent_correct",
@@ -59,78 +109,20 @@ export default function SettingsPage() {
     }));
   };
 
-  const onCreateProfile = () => {
-    const trimmedName = newProfileName.trim();
-    if (!trimmedName) {
-      setErrorMessage("Enter a profile name to create a new profile.");
-      return;
-    }
-
-    if (profiles[trimmedName]) {
-      setActiveProfile(trimmedName);
-      setNewProfileName("");
-      setErrorMessage("");
-      return;
-    }
-
-    setProfiles((prev) => ({
-      ...prev,
-      [trimmedName]: { ...DEFAULT_SETTINGS },
-    }));
-    setActiveProfile(trimmedName);
-    setNewProfileName("");
-    setErrorMessage("");
-  };
-
   return (
     <section className="space-y-8 pt-6 sm:pt-10">
-      <BrandHeader subtitle="Settings are saved locally per profile and used when analyzing your CSV data." />
+      <BrandHeader subtitle="Settings are saved locally and used when analyzing your CSV data." />
 
       <Card title="Settings">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-2">
-            <label className="block text-sm font-medium text-stone-900" htmlFor="profile-select">
-              Profile
-            </label>
-            <select
-              id="profile-select"
-              value={activeProfile}
-              onChange={(event) => {
-                setActiveProfile(event.target.value);
-                setErrorMessage("");
-              }}
-              className="w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900"
-            >
-              {Object.keys(profiles).map((profileName) => (
-                <option key={profileName} value={profileName}>
-                  {profileName}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="space-y-2">
-            <label className="block text-sm font-medium text-stone-900" htmlFor="new-profile-name">
-              Create new profile
-            </label>
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <input
-                id="new-profile-name"
-                value={newProfileName}
-                onChange={(event) => {
-                  setNewProfileName(event.target.value);
-                }}
-                placeholder="Profile name"
-                className="w-full rounded-md border border-stone-300 px-3 py-2 text-sm text-stone-900"
-              />
-              <button
-                type="button"
-                onClick={onCreateProfile}
-                className="rounded-md border border-stone-300 px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-100"
-              >
-                Save
-              </button>
-            </div>
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold text-stone-900">Account</h3>
+          <div className="rounded-md border border-stone-200 bg-stone-50 p-3 text-sm text-stone-700">
+            <p>
+              Name: <span className="font-semibold text-stone-900">{account.displayName}</span>
+            </p>
+            <p>
+              Email: <span className="font-semibold text-stone-900">{account.email}</span>
+            </p>
           </div>
         </div>
 
@@ -208,20 +200,18 @@ export default function SettingsPage() {
           ) : null}
         </div>
 
-        <div className="rounded-md border border-stone-200 bg-stone-50 p-3 text-sm text-stone-700">
-          Active profile: <span className="font-semibold">{activeProfile || DEFAULT_PROFILE_NAME}</span>
-        </div>
-
-        {errorMessage ? <Alert variant="error">{errorMessage}</Alert> : null}
-
-        <div>
+        <div className="flex flex-wrap items-center gap-3">
           <Link
             href="/upload"
             className="inline-flex items-center rounded-md border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-100"
           >
             Back to Upload
           </Link>
+          <LogoutButton className="inline-flex items-center rounded-md bg-stone-800 px-4 py-2 text-sm font-semibold text-amber-50 transition hover:bg-stone-700 disabled:opacity-60" />
         </div>
+
+        {/* Keep local settings storage keyed by existing profile id for backward compatibility. */}
+        <input type="hidden" value={activeProfile || DEFAULT_PROFILE_NAME} readOnly />
       </Card>
     </section>
   );

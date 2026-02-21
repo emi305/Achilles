@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { ModeSelector } from "./ModeSelector";
+import { LogoutButton } from "./LogoutButton";
 
 type GreekFrameProps = {
   children: ReactNode;
@@ -23,7 +23,7 @@ export function GreekFrame({ children }: GreekFrameProps) {
           <Link href="/settings" className="settings-link">
             Settings
           </Link>
-          <ModeSelector />
+          <LogoutButton className="settings-link" />
         </div>
       </div>
 
