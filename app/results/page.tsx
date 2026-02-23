@@ -8,6 +8,7 @@ import { BrandHeader } from "../components/BrandHeader";
 import { Card } from "../components/Card";
 import { computeAccuracy, computeAvgPercentCorrect } from "../lib/avgCorrect";
 import { CATEGORY_LABEL_BY_TYPE, getCategoryOrderForTest } from "../lib/blueprint";
+import type { RehabSnapshotSaveRequest } from "../lib/rehab";
 import {
   clearUploadSession,
   getClientParsedRows,
@@ -843,6 +844,7 @@ export default function ResultsPage() {
   const [chatError, setChatError] = useState("");
   const [debugEnabled, setDebugEnabled] = useState(false);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const rehabAutosaveSentKeysRef = useRef<Set<string>>(new Set());
   const parsedRows = useSyncExternalStore(subscribeUploadSession, getClientParsedRows, getServerParsedRows);
   const uploadSession = getUploadSession();
   const selectedTest = useMemo<TestType>(() => {
@@ -943,6 +945,101 @@ export default function ResultsPage() {
     () => hasScoreReportData && aggregated.some((row) => row.hasProi),
     [aggregated, hasScoreReportData],
   );
+  const rehabSnapshotPayload = useMemo<RehabSnapshotSaveRequest | null>(() => {
+    if (aggregated.length === 0) {
+      return null;
+    }
+
+    const hasQbankData = aggregated.some(
+      (row) => row.attemptedCount > 0 && typeof row.roi === "number" && Number.isFinite(row.roi),
+    );
+    const hasScoreData = hasScoreReportData && aggregated.some((row) => row.hasProi && Number.isFinite(row.proi));
+
+    const weightedRoiRows = aggregated.filter(
+      (row) => row.hasRoi && row.attemptedCount > 0 && typeof row.roi === "number" && Number.isFinite(row.roi),
+    );
+    const weightedProiRows = aggregated.filter((row) => row.hasProi && Number.isFinite(row.proi));
+    const qbankRowsWithAttempts = aggregated.filter(
+      (row) =>
+        row.attemptedCount > 0 &&
+        typeof row.avgPercentCorrect === "number" &&
+        Number.isFinite(row.avgPercentCorrect) &&
+        Number.isFinite(row.qbankCorrectSum),
+    );
+
+    const overallRoi =
+      weightedRoiRows.length > 0
+        ? weightedRoiRows.reduce((sum, row) => sum + (row.roi ?? 0), 0)
+        : null;
+    const overallProi =
+      weightedProiRows.length > 0 ? weightedProiRows.reduce((sum, row) => sum + row.proi, 0) : null;
+
+    const overallAttemptedCount =
+      qbankRowsWithAttempts.length > 0
+        ? qbankRowsWithAttempts.reduce((sum, row) => sum + row.attemptedCount, 0)
+        : null;
+
+    const weightedCorrectSum =
+      qbankRowsWithAttempts.length > 0 ? qbankRowsWithAttempts.reduce((sum, row) => sum + row.qbankCorrectSum, 0) : 0;
+    const weightedAttemptedSum =
+      qbankRowsWithAttempts.length > 0 ? qbankRowsWithAttempts.reduce((sum, row) => sum + row.attemptedCount, 0) : 0;
+
+    const overallAvgPercentCorrect =
+      weightedAttemptedSum > 0
+        ? (weightedCorrectSum / weightedAttemptedSum) * 100
+        : aggregated.some((row) => typeof row.avgPercentCorrect === "number" && Number.isFinite(row.avgPercentCorrect))
+          ? aggregated
+              .filter((row) => typeof row.avgPercentCorrect === "number" && Number.isFinite(row.avgPercentCorrect))
+              .reduce((sum, row, index, rows) => sum + (row.avgPercentCorrect ?? 0) / rows.length, 0)
+          : null;
+
+    const categories = aggregated
+      .filter(
+        (row) =>
+          row.hasRoi ||
+          row.hasProi ||
+          row.attemptedCount > 0 ||
+          (typeof row.avgPercentCorrect === "number" && Number.isFinite(row.avgPercentCorrect)),
+      )
+      .map((row) => ({
+        categoryName: row.name,
+        categoryType: row.categoryType,
+        weight: typeof row.blueprintWeight === "number" && Number.isFinite(row.blueprintWeight) ? row.blueprintWeight : null,
+        roi: row.hasRoi && typeof row.roi === "number" && Number.isFinite(row.roi) ? row.roi : null,
+        hasRoi: row.hasRoi && row.attemptedCount > 0 && typeof row.roi === "number" && Number.isFinite(row.roi),
+        proi: row.hasProi && Number.isFinite(row.proi) ? row.proi : null,
+        hasProi: row.hasProi && Number.isFinite(row.proi),
+        avgPercentCorrect:
+          typeof row.avgPercentCorrect === "number" && Number.isFinite(row.avgPercentCorrect) ? row.avgPercentCorrect : null,
+        attemptedCount: row.attemptedCount > 0 ? row.attemptedCount : null,
+      }));
+
+    const sessionSavedAt = uploadSession?.savedAt;
+    const snapshotAt = typeof sessionSavedAt === "string" && !Number.isNaN(Date.parse(sessionSavedAt))
+      ? sessionSavedAt
+      : new Date().toISOString();
+    const clientSnapshotKey = [
+      selectedTest,
+      snapshotAt,
+      hasQbankData ? "qbank" : "noqbank",
+      hasScoreData ? "score" : "noscore",
+      String(categories.length),
+    ].join("|");
+
+    return {
+      clientSnapshotKey,
+      examMode: selectedTest,
+      snapshotAt,
+      label: null,
+      hasQbankData,
+      hasScoreReportData: hasScoreData,
+      overallRoi,
+      overallProi,
+      overallAvgPercentCorrect,
+      overallAttemptedCount,
+      categories,
+    };
+  }, [aggregated, hasScoreReportData, selectedTest, uploadSession]);
   const isComlexScoreReportOnly = selectedTest === "comlex2" && hasScoreReportData && !hasComlexQbankRoiRows;
   const comlexProiItems = useMemo(
     () =>
@@ -1541,6 +1638,38 @@ export default function ResultsPage() {
   const isDevNoSession = process.env.NODE_ENV !== "production" && parsedRows.length === 0;
 
   useEffect(() => {
+    if (!mounted || !rehabSnapshotPayload || parsedRows.length === 0) {
+      return;
+    }
+
+    const snapshotKey = rehabSnapshotPayload.clientSnapshotKey;
+    if (!snapshotKey || rehabAutosaveSentKeysRef.current.has(snapshotKey)) {
+      return;
+    }
+
+    rehabAutosaveSentKeysRef.current.add(snapshotKey);
+
+    void fetch("/api/rehab/snapshots", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(rehabSnapshotPayload),
+    }).then((response) => {
+      if (response.ok) {
+        return;
+      }
+      if (process.env.NODE_ENV !== "production") {
+        console.warn("[rehab] snapshot autosave failed", response.status);
+      }
+    }).catch((saveError) => {
+      if (process.env.NODE_ENV !== "production") {
+        console.warn("[rehab] snapshot autosave error", saveError);
+      }
+    });
+  }, [mounted, parsedRows.length, rehabSnapshotPayload]);
+
+  useEffect(() => {
     setMounted(true);
   }, []);
 
@@ -1604,6 +1733,13 @@ export default function ResultsPage() {
                 {modeLabels[mode]}
               </button>
             ))}
+            <button
+              type="button"
+              onClick={() => router.push(`/rehab?examMode=${encodeURIComponent(selectedTest)}`)}
+              className="cursor-pointer rounded-md border border-stone-300 bg-white px-3 py-1.5 text-sm font-medium text-stone-700 hover:bg-stone-50"
+            >
+              Rehab
+            </button>
             <button
               type="button"
               onClick={handleExportPdf}
