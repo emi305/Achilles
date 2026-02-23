@@ -134,8 +134,8 @@ export function PricingClient({ viewer }: PricingClientProps) {
 
       <div className="grid gap-4 md:grid-cols-3">
         <article className="rounded-lg border border-stone-200 bg-white/95 p-5 shadow-sm">
-          <h3 className="text-lg font-semibold text-stone-900">Pro Monthly</h3>
-          <p className="mt-2 text-3xl font-semibold text-stone-800">$19</p>
+          <h3 className="text-lg font-semibold text-stone-900">Monthly Access</h3>
+          <p className="mt-2 text-3xl font-semibold text-stone-800">$12</p>
           <p className="text-sm text-stone-600">per month</p>
           <button
             type="button"
@@ -148,8 +148,8 @@ export function PricingClient({ viewer }: PricingClientProps) {
         </article>
 
         <article className="rounded-lg border border-stone-200 bg-white/95 p-5 shadow-sm">
-          <h3 className="text-lg font-semibold text-stone-900">Pro 3-Month</h3>
-          <p className="mt-2 text-3xl font-semibold text-stone-800">$49</p>
+          <h3 className="text-lg font-semibold text-stone-900">Dedicated Block (3-Month)</h3>
+          <p className="mt-2 text-3xl font-semibold text-stone-800">$29</p>
           <p className="text-sm text-stone-600">every 3 months</p>
           <button
             type="button"
@@ -162,8 +162,8 @@ export function PricingClient({ viewer }: PricingClientProps) {
         </article>
 
         <article className="rounded-lg border border-stone-200 bg-white/95 p-5 shadow-sm">
-          <h3 className="text-lg font-semibold text-stone-900">Pro Annual</h3>
-          <p className="mt-2 text-3xl font-semibold text-stone-800">$149</p>
+          <h3 className="text-lg font-semibold text-stone-900">Full Cycle (Annual)</h3>
+          <p className="mt-2 text-3xl font-semibold text-stone-800">$99</p>
           <p className="text-sm text-stone-600">per year</p>
           <button
             type="button"
