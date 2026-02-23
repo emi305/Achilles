@@ -13,9 +13,14 @@ export function GreekFrame({ children }: GreekFrameProps) {
       <div aria-hidden className="greek-column greek-column-right" />
 
       <div className="settings-link-wrap settings-link-wrap-left">
-        <Link href="/" className="settings-link">
-          Home
-        </Link>
+        <div className="settings-link-stack items-start">
+          <Link href="/" className="settings-link">
+            Home
+          </Link>
+          <Link href="/legal" className="settings-link">
+            Legal
+          </Link>
+        </div>
       </div>
 
       <div className="settings-link-wrap">

@@ -403,6 +403,9 @@ export default function UploadPage() {
       <p className="mx-auto max-w-2xl text-center text-sm text-stone-700 sm:text-base">
         Upload screenshots and/or PDFs and/or text.
       </p>
+      <p className="mx-auto max-w-2xl text-center text-sm font-medium text-amber-800">
+        Do not upload PHI or patient identifiers. Educational use only.
+      </p>
 
       {modeChangedNotice ? <Alert variant="info">{modeChangedNotice}</Alert> : null}
 

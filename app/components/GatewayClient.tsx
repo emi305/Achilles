@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createSupabaseBrowserClient } from "../lib/supabase/client";
@@ -187,6 +188,20 @@ export function GatewayClient({ viewer }: GatewayClientProps) {
             >
               {busy ? "Please wait..." : mode === "signup" ? "Create account" : "Log in"}
             </button>
+
+            {mode === "signup" ? (
+              <p className="text-xs text-stone-600">
+                By creating an account, you agree to our{" "}
+                <Link href="/legal#terms" className="underline underline-offset-2 hover:text-stone-900">
+                  Terms
+                </Link>{" "}
+                and{" "}
+                <Link href="/legal#privacy" className="underline underline-offset-2 hover:text-stone-900">
+                  Privacy Policy
+                </Link>
+                .
+              </p>
+            ) : null}
           </div>
         ) : (
           <div className="space-y-4">
